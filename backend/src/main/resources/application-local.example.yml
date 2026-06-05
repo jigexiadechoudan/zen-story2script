@@ -1,0 +1,24 @@
+# Copy this file to application-local.yml for local development.
+# application-local.yml is ignored by git and may contain secrets.
+
+spring:
+  profiles:
+    active: local
+  ai:
+    model:
+      chat: openai
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
+    openai:
+      base-url: https://api.openai.com
+      api-key: replace-with-your-api-key
+      chat:
+        options:
+          model: gpt-4.1-mini
+
+server:
+  port: 8080

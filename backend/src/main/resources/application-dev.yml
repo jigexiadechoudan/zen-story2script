@@ -1,0 +1,10 @@
+spring:
+  ai:
+    openai:
+      chat:
+        options:
+          temperature: 0.3
+
+logging:
+  level:
+    dev.zen.story2script: DEBUG
