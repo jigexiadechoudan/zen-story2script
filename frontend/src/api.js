@@ -1,5 +1,9 @@
 const DEFAULT_API_BASE_URL = 'http://localhost:8080'
 
+const NETWORK_ERROR_MESSAGE = '浏览器未能访问后端，可能是后端未启动或 CORS 未放行。'
+const LOCAL_MOCK_MESSAGE = '本地 mock，仅用于前端演示。'
+const BACKEND_DEV_FALLBACK_MESSAGE = '后端已连通，但当前未配置真实模型，展示 dev fallback 结果。'
+
 const formatLabels = {
   short_drama: '短剧',
   screenplay: '影视剧本',
@@ -22,13 +26,21 @@ export async function convertNovel(payload) {
       throw new ApiError(data?.message || '转换失败，请稍后重试。', data?.code, response.status)
     }
 
-    return normalizeConvertResponse(data, false)
+    return normalizeConvertResponse(data, {
+      source: 'backend',
+      networkMessage: '',
+      localMockMessage: ''
+    })
   } catch (error) {
     if (error instanceof ApiError) {
       throw error
     }
 
-    return normalizeConvertResponse(createMockResponse(payload, error), true)
+    return normalizeConvertResponse(createMockResponse(payload, error), {
+      source: 'local_mock',
+      networkMessage: NETWORK_ERROR_MESSAGE,
+      localMockMessage: LOCAL_MOCK_MESSAGE
+    })
   }
 }
 
@@ -61,23 +73,37 @@ async function parseJsonResponse(response) {
   }
 }
 
-function normalizeConvertResponse(data, usedMock) {
-  const trace = Array.isArray(data.agentTrace)
-    ? data.agentTrace
-    : Array.isArray(data.agentTrace?.steps)
-      ? data.agentTrace.steps
-      : []
-
-  const qualityReport = normalizeQualityReport(data.qualityReport)
+function normalizeConvertResponse(data, meta) {
+  const trace = normalizeAgentTrace(data?.agentTrace)
+  const qualityReport = normalizeQualityReport(data?.qualityReport)
+  const warnings = Array.isArray(data?.warnings) ? data.warnings : []
+  const backendFallback = meta.source === 'backend' && hasBackendFallbackSignal(warnings, trace, data?.agentTrace)
 
   return {
-    yaml: data.yaml || '',
-    schemaVersion: data.schemaVersion || '1.0',
-    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+    yaml: data?.yaml || '',
+    schemaVersion: data?.schemaVersion || '1.0',
+    warnings,
     qualityReport,
     agentTrace: trace,
-    usedMock
+    source: meta.source,
+    networkMessage: meta.networkMessage,
+    localMockMessage: meta.localMockMessage,
+    backendFallbackMessage: backendFallback ? BACKEND_DEV_FALLBACK_MESSAGE : '',
+    usedMock: meta.source === 'local_mock',
+    usedBackendFallback: backendFallback
   }
+}
+
+function normalizeAgentTrace(agentTrace) {
+  if (Array.isArray(agentTrace)) {
+    return agentTrace
+  }
+
+  if (Array.isArray(agentTrace?.steps)) {
+    return agentTrace.steps
+  }
+
+  return []
 }
 
 function normalizeQualityReport(report) {
@@ -93,6 +119,30 @@ function normalizeQualityReport(report) {
   }
 
   return report
+}
+
+function hasBackendFallbackSignal(warnings, trace, rawAgentTrace) {
+  const values = [
+    ...warnings,
+    ...trace,
+    rawAgentTrace?.mode,
+    rawAgentTrace?.status,
+    rawAgentTrace?.message
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase())
+
+  return values.some((value) =>
+    [
+      'dev fallback',
+      '未调用真实大模型',
+      '未配置真实模型',
+      'no spring ai chatmodel',
+      'chatmodel unavailable',
+      'fallback tool',
+      'mock agent'
+    ].some((signal) => value.includes(signal.toLowerCase()))
+  )
 }
 
 function createMockResponse(payload, error) {
@@ -138,8 +188,8 @@ function createMockResponse(payload, error) {
     ].join('\n'),
     schemaVersion: '1.0',
     warnings: [
-      '后端暂时不可用，当前展示的是前端 mock fallback 结果。',
-      error?.message ? `网络错误：${error.message}` : '请在后端启动后重新转换以获取真实结果。'
+      LOCAL_MOCK_MESSAGE,
+      error?.message ? `网络错误：${error.message}` : NETWORK_ERROR_MESSAGE
     ],
     qualityReport: {
       chapterCount,
@@ -149,6 +199,7 @@ function createMockResponse(payload, error) {
       repaired: false
     },
     agentTrace: [
+      '本地 mock 已接管转换流程',
       '已完成章节解析',
       `已识别目标格式：${formatLabel}`,
       '已抽取角色和关键事件',

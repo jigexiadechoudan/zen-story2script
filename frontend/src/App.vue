@@ -23,6 +23,17 @@ const actionMessage = ref('')
 const chapterCount = computed(() => estimateChapterCount(form.sourceText))
 const sourceLength = computed(() => form.sourceText.trim().length)
 const hasYaml = computed(() => Boolean(result.value?.yaml))
+const statusMessages = computed(() => {
+  if (!result.value) {
+    return []
+  }
+
+  return [
+    result.value.networkMessage,
+    result.value.localMockMessage,
+    result.value.backendFallbackMessage
+  ].filter(Boolean)
+})
 
 async function handleConvert() {
   errorMessage.value = ''
@@ -184,8 +195,8 @@ function sanitizeFileName(value) {
           {{ actionMessage }}
         </div>
 
-        <div v-if="result?.usedMock" class="message notice" role="status">
-          后端未连通，当前展示 mock fallback，结构与接口响应保持一致。
+        <div v-for="message in statusMessages" :key="message" class="message notice" role="status">
+          {{ message }}
         </div>
 
         <pre class="yaml-preview" :class="{ empty: !hasYaml }">{{ hasYaml ? result.yaml : '转换后将在这里预览 YAML 输出。' }}</pre>
