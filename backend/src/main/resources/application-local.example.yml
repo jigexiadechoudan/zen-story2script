@@ -1,12 +1,15 @@
 # Copy this file to application-local.yml for local development.
 # application-local.yml is ignored by git and may contain secrets.
+# Prefer environment variables:
+#   SPRING_PROFILES_ACTIVE=local
+#   OPENAI_BASE_URL=https://api.openai.com
+#   OPENAI_API_KEY=<your-openai-api-key>
+#   OPENAI_MODEL=gpt-4.1-mini
 
 spring:
-  profiles:
-    active: local
   ai:
     model:
-      chat: openai
+      chat: ${SPRING_AI_MODEL_CHAT:openai}
       embedding: none
       image: none
       moderation: none
@@ -14,11 +17,17 @@ spring:
         speech: none
         transcription: none
     openai:
-      base-url: https://api.openai.com
-      api-key: replace-with-your-api-key
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      api-key: ${OPENAI_API_KEY:}
       chat:
         options:
-          model: gpt-4.1-mini
+          model: ${OPENAI_MODEL:gpt-4.1-mini}
+          temperature: 0.3
+
+story2script:
+  ai:
+    openai:
+      enabled: true
 
 server:
   port: 8080
