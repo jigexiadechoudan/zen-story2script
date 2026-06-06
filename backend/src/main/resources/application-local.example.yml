@@ -1,10 +1,15 @@
-# Copy this file to application-local.yml for local development.
-# application-local.yml is ignored by git and may contain secrets.
-# Prefer environment variables:
-#   SPRING_PROFILES_ACTIVE=local
-#   OPENAI_BASE_URL=https://api.openai.com
+# Local profile example for real OpenAI-compatible chat models.
+#
+# Usage:
+# 1. Copy this file to application-local.yml.
+# 2. Start the backend with SPRING_PROFILES_ACTIVE=local.
+# 3. Put your real API key in application-local.yml or OPENAI_API_KEY.
+#
+# application-local.yml is ignored by git and may contain secrets. Do not commit it.
+# Environment variables override these placeholders:
+#   OPENAI_BASE_URL=https://www.yysc.top/v1
 #   OPENAI_API_KEY=<your-openai-api-key>
-#   OPENAI_MODEL=gpt-4.1-mini
+#   OPENAI_MODEL=gpt-5.5
 
 spring:
   ai:
@@ -17,11 +22,11 @@ spring:
         speech: none
         transcription: none
     openai:
-      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      base-url: ${OPENAI_BASE_URL:https://www.yysc.top/v1}
       api-key: ${OPENAI_API_KEY:}
       chat:
         options:
-          model: ${OPENAI_MODEL:gpt-4.1-mini}
+          model: ${OPENAI_MODEL:gpt-5.5}
           temperature: 0.3
 
 story2script:
