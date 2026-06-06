@@ -8,11 +8,17 @@ const targetOptions = [
   { value: 'scene_outline', label: '分场大纲' }
 ]
 
+const conversionModeOptions = [
+  { value: 'fast', label: '快速' },
+  { value: 'react', label: '完整' }
+]
+
 const form = reactive({
   title: '',
   sourceText: '',
   targetFormat: 'short_drama',
-  styleHint: ''
+  styleHint: '',
+  conversionMode: 'fast'
 })
 
 const loading = ref(false)
@@ -21,6 +27,8 @@ const result = ref(null)
 const actionMessage = ref('')
 const locale = ref('zh')
 const streamSteps = ref([])
+const elapsedSeconds = ref(0)
+let elapsedTimer = null
 
 const localeOptions = [
   { value: 'zh', label: '中文' },
@@ -41,6 +49,9 @@ const messages = {
     sourceLabel: '小说正文',
     sourcePlaceholder: '第一章 ...\n\n第二章 ...\n\n第三章 ...',
     targetLabel: '改编目标',
+    modeLabel: '转换模式',
+    modeSummary: '当前模式',
+    elapsed: '耗时',
     styleLabel: '风格提示',
     stylePlaceholder: '悬疑、现实主义、节奏紧凑',
     convertIdle: '开始转换',
@@ -59,6 +70,10 @@ const messages = {
     noTrace: '暂无步骤摘要。',
     noQuality: '暂无质量报告。',
     noWarnings: '暂无警告。',
+    progressTitle: '转换进度',
+    currentStep: '当前步骤',
+    waitingStep: '等待智能体返回步骤。',
+    finalizing: '正在整理最终 YAML。',
     copied: 'YAML 已复制到剪贴板。',
     copyFailed: '复制失败，请手动选择 YAML 内容复制。',
     downloaded: '已下载 {fileName}。',
@@ -72,9 +87,18 @@ const messages = {
       screenplay: '影视剧本',
       scene_outline: '分场大纲'
     },
+    modeOptions: {
+      fast: '快速模式',
+      react: '完整 ReAct'
+    },
+    modeHints: {
+      fast: '1 次模型生成，适合联调和 demo。',
+      react: '多步分析规划，质量更细但更慢。'
+    },
     qualityKeys: {
       confidence: '置信度',
       checks: '检查项',
+      conversionMode: '转换模式',
       chapterCount: '章节数',
       characterCount: '角色数',
       sceneCount: '场景数',
@@ -82,25 +106,32 @@ const messages = {
       repaired: '是否修复'
     },
     checkLabels: {
+      fast_mode: '快速模式',
       chapter_parse: '章节解析',
       story_analysis: '故事分析',
       scene_planning: '场景规划',
       yaml_write: 'YAML 生成',
-      yaml_validation: 'YAML 校验'
+      yaml_validation: 'YAML 校验',
+      yaml_repair: 'YAML 修复',
+      yaml_validation_after_repair: '修复后校验'
     },
     traceLabels: {
+      dev_fallback: '演示降级',
       chapter_parse: '章节解析',
       story_analysis: '故事分析',
       scene_planning: '场景规划',
       yaml_write: 'YAML 生成',
-      yaml_validation: 'YAML 校验'
+      yaml_validation: 'YAML 校验',
+      yaml_repair: 'YAML 修复'
     },
     traceMessages: {
+      dev_fallback: '当前使用演示降级输出。',
       chapter_parse: '已识别并校验小说章节。',
       story_analysis: '已分析角色、事件与冲突。',
       scene_planning: '已根据故事分析规划剧本场景。',
       yaml_write: '已生成结构化剧本 YAML 草稿。',
-      yaml_validation: 'YAML 结构校验通过。'
+      yaml_validation: 'YAML 结构校验通过。',
+      yaml_repair: '已尝试修复 YAML 结构。'
     }
   },
   en: {
@@ -116,6 +147,9 @@ const messages = {
     sourceLabel: 'Novel text',
     sourcePlaceholder: 'Chapter 1 ...\n\nChapter 2 ...\n\nChapter 3 ...',
     targetLabel: 'Adaptation target',
+    modeLabel: 'Conversion mode',
+    modeSummary: 'Mode',
+    elapsed: 'Elapsed',
     styleLabel: 'Style hint',
     stylePlaceholder: 'Suspense, realism, tight pacing',
     convertIdle: 'Start conversion',
@@ -134,6 +168,10 @@ const messages = {
     noTrace: 'No step summary yet.',
     noQuality: 'No quality report yet.',
     noWarnings: 'No warnings.',
+    progressTitle: 'Progress',
+    currentStep: 'Current step',
+    waitingStep: 'Waiting for agent progress.',
+    finalizing: 'Finalizing YAML.',
     copied: 'YAML copied to clipboard.',
     copyFailed: 'Copy failed. Select the YAML manually.',
     downloaded: 'Downloaded {fileName}.',
@@ -147,9 +185,18 @@ const messages = {
       screenplay: 'Screenplay',
       scene_outline: 'Scene Outline'
     },
+    modeOptions: {
+      fast: 'Fast Mode',
+      react: 'Full ReAct'
+    },
+    modeHints: {
+      fast: 'One model generation for testing and demos.',
+      react: 'Multi-step analysis and planning, slower but richer.'
+    },
     qualityKeys: {
       confidence: 'Confidence',
       checks: 'Checks',
+      conversionMode: 'Conversion mode',
       chapterCount: 'Chapter count',
       characterCount: 'Character count',
       sceneCount: 'Scene count',
@@ -157,25 +204,32 @@ const messages = {
       repaired: 'Repaired'
     },
     checkLabels: {
+      fast_mode: 'Fast mode',
       chapter_parse: 'Chapter parsing',
       story_analysis: 'Story analysis',
       scene_planning: 'Scene planning',
       yaml_write: 'YAML writing',
-      yaml_validation: 'YAML validation'
+      yaml_validation: 'YAML validation',
+      yaml_repair: 'YAML repair',
+      yaml_validation_after_repair: 'Post-repair validation'
     },
     traceLabels: {
+      dev_fallback: 'Demo fallback',
       chapter_parse: 'Chapter parsing',
       story_analysis: 'Story analysis',
       scene_planning: 'Scene planning',
       yaml_write: 'YAML writing',
-      yaml_validation: 'YAML validation'
+      yaml_validation: 'YAML validation',
+      yaml_repair: 'YAML repair'
     },
     traceMessages: {
+      dev_fallback: 'Using demo fallback output.',
       chapter_parse: 'Parsed and validated the source chapters.',
       story_analysis: 'Analyzed characters, events, and conflicts.',
       scene_planning: 'Planned screenplay scenes from the story analysis.',
       yaml_write: 'Generated the structured screenplay YAML draft.',
-      yaml_validation: 'YAML structure validation passed.'
+      yaml_validation: 'YAML structure validation passed.',
+      yaml_repair: 'Attempted to repair the YAML structure.'
     }
   }
 }
@@ -191,8 +245,23 @@ const localizedTargetOptions = computed(() =>
     label: t.value.targetOptions[option.value] || option.label
   }))
 )
+const localizedConversionModeOptions = computed(() =>
+  conversionModeOptions.map((option) => ({
+    ...option,
+    label: t.value.modeOptions[option.value] || option.label,
+    hint: t.value.modeHints[option.value] || ''
+  }))
+)
 const rawAgentTrace = computed(() => (loading.value ? streamSteps.value : result.value?.agentTrace || []))
 const localizedAgentTrace = computed(() => rawAgentTrace.value.map(formatTraceStep))
+const currentStepText = computed(() => {
+  if (!loading.value) {
+    return localizedAgentTrace.value.at(-1) || t.value.noTrace
+  }
+  return localizedAgentTrace.value.at(-1) || t.value.waitingStep
+})
+const elapsedText = computed(() => formatDuration(elapsedSeconds.value))
+const activeModeLabel = computed(() => t.value.modeOptions[form.conversionMode] || form.conversionMode)
 const yamlPreviewText = computed(() => {
   if (hasYaml.value) {
     return result.value.yaml
@@ -238,13 +307,14 @@ async function handleConvert() {
   loading.value = true
   result.value = null
   streamSteps.value = []
+  startElapsedTimer()
   try {
     result.value = await convertNovel({
       title: form.title.trim(),
       sourceText: form.sourceText.trim(),
       targetFormat: form.targetFormat,
       styleHint: form.styleHint.trim(),
-      conversionMode: 'fast'
+      conversionMode: form.conversionMode
     }, (event) => {
       if (event.payload?.type === 'status') {
         streamSteps.value = [...streamSteps.value, event.payload.message]
@@ -261,6 +331,7 @@ async function handleConvert() {
     }
   } finally {
     loading.value = false
+    stopElapsedTimer()
   }
 }
 
@@ -341,6 +412,30 @@ function formatQualityValue(key, value) {
   return value
 }
 
+function startElapsedTimer() {
+  stopElapsedTimer()
+  elapsedSeconds.value = 0
+  elapsedTimer = window.setInterval(() => {
+    elapsedSeconds.value += 1
+  }, 1000)
+}
+
+function stopElapsedTimer() {
+  if (elapsedTimer) {
+    window.clearInterval(elapsedTimer)
+    elapsedTimer = null
+  }
+}
+
+function formatDuration(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes <= 0) {
+    return `${seconds}s`
+  }
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`
+}
+
 function estimateChapterCount(sourceText) {
   const matches = sourceText.match(/(^|\n)\s*(#{1,6}\s*)?(第\s*[一二三四五六七八九十百千万零〇两\d０-９]+\s*[章节回]|chapter\s+\d+)/gi)
   return matches?.length || 0
@@ -407,6 +502,17 @@ function sanitizeFileName(value) {
           </label>
         </fieldset>
 
+        <fieldset class="mode-group">
+          <legend>{{ t.modeLabel }}</legend>
+          <label v-for="option in localizedConversionModeOptions" :key="option.value" class="mode-option">
+            <input v-model="form.conversionMode" type="radio" name="conversionMode" :value="option.value" />
+            <span>
+              <strong>{{ option.label }}</strong>
+              <small>{{ option.hint }}</small>
+            </span>
+          </label>
+        </fieldset>
+
         <label class="field">
           <span>{{ t.styleLabel }}</span>
           <input v-model="form.styleHint" type="text" :placeholder="t.stylePlaceholder" />
@@ -439,6 +545,21 @@ function sanitizeFileName(value) {
 
         <div v-for="message in statusMessages" :key="message" class="message notice" role="status">
           {{ message }}
+        </div>
+
+        <div class="run-status" :class="{ active: loading }" role="status">
+          <div>
+            <span>{{ t.modeSummary }}</span>
+            <strong>{{ activeModeLabel }}</strong>
+          </div>
+          <div>
+            <span>{{ t.elapsed }}</span>
+            <strong>{{ elapsedText }}</strong>
+          </div>
+          <div class="run-status-step">
+            <span>{{ loading ? t.currentStep : t.progressTitle }}</span>
+            <strong>{{ loading ? currentStepText : (localizedAgentTrace.length ? t.finalizing : t.noTrace) }}</strong>
+          </div>
         </div>
 
         <pre class="yaml-preview" :class="{ empty: !hasYaml, streaming: loading }">{{ yamlPreviewText }}</pre>

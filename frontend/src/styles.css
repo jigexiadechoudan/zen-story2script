@@ -191,8 +191,7 @@ h3 {
 }
 
 .field.grow {
-  flex: 1;
-  min-height: 300px;
+  flex: 0 0 auto;
 }
 
 .field span,
@@ -222,7 +221,8 @@ input[type="text"] {
 }
 
 textarea {
-  min-height: 100%;
+  min-height: 360px;
+  max-height: 360px;
   resize: vertical;
   padding: 12px;
   line-height: 1.65;
@@ -275,6 +275,65 @@ textarea:focus {
 
 .format-option span {
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mode-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mode-group legend {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  min-height: 68px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: #fffefd;
+  cursor: pointer;
+}
+
+.mode-option:has(input:checked) {
+  border-color: var(--accent);
+  background: #e8f2ef;
+}
+
+.mode-option input {
+  flex: 0 0 auto;
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.mode-option span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mode-option strong {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.mode-option small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
@@ -358,6 +417,72 @@ button:disabled {
   color: var(--notice);
 }
 
+.run-status {
+  display: grid;
+  grid-template-columns: minmax(104px, 0.55fr) minmax(86px, 0.42fr) minmax(0, 1.6fr);
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.run-status > div {
+  min-width: 0;
+  padding: 10px 12px;
+  background: #fffefd;
+}
+
+.run-status span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.run-status strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.run-status.active {
+  border-color: rgba(36, 107, 95, 0.38);
+  background: rgba(36, 107, 95, 0.38);
+}
+
+.run-status.active > div {
+  background: #f1f8f5;
+}
+
+.run-status-step {
+  position: relative;
+}
+
+.run-status.active .run-status-step::after {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 rgba(36, 107, 95, 0.34);
+  content: "";
+  animation: pulse 1.4s ease-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(36, 107, 95, 0.34);
+  }
+
+  100% {
+    box-shadow: 0 0 0 10px rgba(36, 107, 95, 0);
+  }
+}
+
 .yaml-preview {
   flex: 1;
   min-height: 360px;
@@ -430,6 +555,12 @@ button:disabled {
   line-height: 1.55;
 }
 
+.trace-list {
+  max-height: 176px;
+  overflow: auto;
+  padding-right: 8px;
+}
+
 .trace-list li,
 .warning-list li {
   margin: 6px 0;
@@ -489,7 +620,12 @@ button:disabled {
   }
 
   .field.grow {
-    min-height: 280px;
+    min-height: 0;
+  }
+
+  textarea {
+    min-height: 320px;
+    max-height: 320px;
   }
 }
 
@@ -506,6 +642,8 @@ button:disabled {
 
   .button-row,
   .format-group,
+  .mode-group,
+  .run-status,
   .insight-grid {
     grid-template-columns: 1fr;
   }
@@ -517,5 +655,10 @@ button:disabled {
   .yaml-preview {
     min-height: 300px;
     max-height: none;
+  }
+
+  textarea {
+    min-height: 300px;
+    max-height: 300px;
   }
 }

@@ -75,7 +75,7 @@ export async function convertNovelStream(payload, onEvent) {
       throw error
     }
     if (error.name === 'AbortError') {
-      throw new ApiError('模型转换超时，请缩短文本或稍后重试。', 'STREAM_TIMEOUT', 408)
+      throw new ApiError('模型转换超时：请先使用快速模式、缩短章节正文，或切换更快的模型后重试。', 'STREAM_TIMEOUT', 408)
     }
     return normalizeConvertResponse(createMockResponse(payload, error), {
       source: 'local_mock',
@@ -298,6 +298,7 @@ function createMockResponse(payload, error) {
     ],
     qualityReport: {
       chapterCount,
+      conversionMode: payload.conversionMode || 'fast',
       characterCount: 2,
       sceneCount: 3,
       reactSteps: 4,
