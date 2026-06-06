@@ -43,7 +43,7 @@ public class WebCorsConfiguration implements WebMvcConfigurer {
         config.setAllowedOrigins(List.of(DEV_ORIGINS));
         config.setAllowedMethods(List.of(API_METHODS));
         config.setAllowedHeaders(List.of(API_HEADERS));
-        config.setAllowCredentials(false);
+        config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -61,6 +61,7 @@ public class WebCorsConfiguration implements WebMvcConfigurer {
                 .allowedOrigins(DEV_ORIGINS)
                 .allowedMethods(API_METHODS)
                 .allowedHeaders(API_HEADERS)
+                .allowCredentials(true)
                 .maxAge(3600);
     }
 }

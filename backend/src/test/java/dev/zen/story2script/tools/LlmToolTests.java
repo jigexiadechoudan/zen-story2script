@@ -1,5 +1,8 @@
 package dev.zen.story2script.tools;
 
+import dev.zen.story2script.rag.InMemoryRagKnowledgeRetriever;
+import dev.zen.story2script.rag.RagKnowledgeService;
+import dev.zen.story2script.rag.StaticRagDocumentReader;
 import dev.zen.story2script.schema.YamlSchemaValidationError;
 import org.junit.jupiter.api.Test;
 
@@ -106,6 +109,49 @@ class LlmToolTests {
                 .asString()
                 .contains("MISSING_TOP_LEVEL_FIELD")
                 .contains("schema_version: 1.0");
+    }
+
+    @Test
+    void scenePlanningToolInjectsRetrievedRagKnowledge() {
+        ScenePlanningTool tool = new ScenePlanningTool(llmClient, ragKnowledgeService());
+
+        tool.plan(new ScenePlanningTool.ScenePlanningInput(
+                "雾镇来信",
+                "{\"events\":[]}",
+                "short_drama",
+                "10min"
+        ));
+
+        assertThat(llmClient.userPrompts()).singleElement()
+                .asString()
+                .contains("RAG knowledge:")
+                .contains("Retrieved adaptation knowledge")
+                .contains("short_drama");
+    }
+
+    @Test
+    void screenplayYamlWriteToolInjectsRetrievedRagKnowledge() {
+        ScreenplayYamlWriteTool tool = new ScreenplayYamlWriteTool(llmClient, ragKnowledgeService());
+
+        tool.writeFast(new ScreenplayYamlWriteTool.FastScreenplayYamlWriteInput(
+                "雾镇来信",
+                "",
+                "zh-CN",
+                "screenplay",
+                "10min",
+                "克制",
+                List.of(new ChapterParseTool.ParsedChapter(1, "Chapter 1", "A reporter returns."))
+        ));
+
+        assertThat(llmClient.userPrompts()).singleElement()
+                .asString()
+                .contains("RAG knowledge:")
+                .contains("Retrieved adaptation knowledge")
+                .contains("screenplay");
+    }
+
+    private RagKnowledgeService ragKnowledgeService() {
+        return new RagKnowledgeService(new InMemoryRagKnowledgeRetriever(new StaticRagDocumentReader()));
     }
 
     private static class CapturingLlmClient implements ToolLlmClient {

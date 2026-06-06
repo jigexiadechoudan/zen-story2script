@@ -22,6 +22,7 @@ export async function convertNovel(payload, onEvent) {
       headers: {
         'Content-Type': 'application/json'
       },
+      credentials: 'include',
       body: JSON.stringify(payload)
     })
 
@@ -60,6 +61,7 @@ export async function convertNovelStream(payload, onEvent) {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream'
       },
+      credentials: 'include',
       body: JSON.stringify(payload),
       signal: controller.signal
     })
@@ -156,6 +158,58 @@ export class ApiError extends Error {
     this.code = code
     this.status = status
   }
+}
+
+export async function getCurrentUser() {
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/me`, {
+    method: 'GET',
+    credentials: 'include'
+  })
+  const data = await parseJsonResponse(response)
+
+  if (response.status === 401) {
+    return null
+  }
+  if (!response.ok) {
+    throw new ApiError(data?.message || 'Failed to load current user.', data?.code, response.status)
+  }
+  return data?.user || null
+}
+
+export async function login(payload) {
+  return submitAuth('/api/auth/login', payload)
+}
+
+export async function register(payload) {
+  return submitAuth('/api/auth/register', payload)
+}
+
+export async function logout() {
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
+    method: 'POST',
+    credentials: 'include'
+  })
+  if (!response.ok) {
+    const data = await parseJsonResponse(response)
+    throw new ApiError(data?.message || 'Logout failed.', data?.code, response.status)
+  }
+}
+
+async function submitAuth(path, payload) {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    credentials: 'include',
+    body: JSON.stringify(payload)
+  })
+  const data = await parseJsonResponse(response)
+
+  if (!response.ok) {
+    throw new ApiError(data?.message || 'Authentication failed.', data?.code, response.status)
+  }
+  return data?.user || null
 }
 
 function getApiBaseUrl() {

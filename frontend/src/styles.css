@@ -202,6 +202,7 @@ h3 {
 }
 
 input[type="text"],
+input[type="password"],
 textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -215,7 +216,8 @@ textarea {
     background 140ms ease;
 }
 
-input[type="text"] {
+input[type="text"],
+input[type="password"] {
   min-height: 44px;
   padding: 10px 12px;
 }
@@ -229,6 +231,7 @@ textarea {
 }
 
 input[type="text"]:focus,
+input[type="password"]:focus,
 textarea:focus {
   border-color: var(--accent);
   background: #ffffff;
@@ -389,6 +392,80 @@ button:disabled {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.secondary-button.compact {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.account-strip {
+  display: grid;
+  grid-template-columns: auto minmax(120px, auto) auto;
+  align-items: center;
+  gap: 8px;
+  max-width: min(100%, 520px);
+  padding: 6px;
+  border: 1px solid var(--line);
+  background: rgba(251, 250, 247, 0.72);
+}
+
+.account-strip span {
+  padding-left: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.account-strip strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.auth-panel {
+  display: grid;
+  gap: 18px;
+  width: min(560px, 100%);
+  margin: 42px auto 0;
+  padding: 18px;
+}
+
+.auth-panel-compact {
+  width: min(420px, 100%);
+}
+
+.auth-tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(82px, auto));
+  border: 1px solid var(--line);
+  background: rgba(251, 250, 247, 0.72);
+}
+
+.auth-tabs button {
+  min-height: 36px;
+  padding: 8px 12px;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.auth-tabs button:last-child {
+  border-right: 0;
+}
+
+.auth-tabs button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
 }
 
 .message {

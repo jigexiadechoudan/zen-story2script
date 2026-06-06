@@ -10,12 +10,25 @@
 #   OPENAI_BASE_URL=https://www.yysc.top
 #   OPENAI_API_KEY=<your-openai-api-key>
 #   OPENAI_MODEL=gpt-5.5
+#   DATABASE_URL=jdbc:postgresql://<your-server-ip>:5432/story2script
+#   DATABASE_USERNAME=story2script
+#   DATABASE_PASSWORD=<your-database-password>
+#   DASHSCOPE_API_KEY=<your-dashscope-api-key>
+#   STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED=false
+#   STORY2SCRIPT_RAG_SYNC_ON_STARTUP=false
+#   AUTH_TOKEN_SECRET=<at-least-32-random-characters>
+#   REGISTRATION_INVITE_CODE=<your-private-invite-code>
 
 spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://127.0.0.1:5432/story2script}
+    username: ${DATABASE_USERNAME:story2script}
+    password: ${DATABASE_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
   ai:
     model:
       chat: ${SPRING_AI_MODEL_CHAT:openai}
-      embedding: none
+      embedding: ${SPRING_AI_MODEL_EMBEDDING:none}
       image: none
       moderation: none
       audio:
@@ -28,11 +41,40 @@ spring:
         options:
           model: ${OPENAI_MODEL:gpt-5.5}
           temperature: 0.3
+      embedding:
+        base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+        api-key: ${DASHSCOPE_API_KEY:}
+        embeddings-path: /embeddings
+        options:
+          model: ${DASHSCOPE_EMBEDDING_MODEL:text-embedding-v4}
+          dimensions: ${DASHSCOPE_EMBEDDING_DIMENSIONS:1024}
+          encoding-format: float
+    vectorstore:
+      type: ${SPRING_AI_VECTORSTORE_TYPE:none}
+      pgvector:
+        initialize-schema: ${PGVECTOR_INITIALIZE_SCHEMA:true}
+        schema-name: ${PGVECTOR_SCHEMA_NAME:public}
+        table-name: ${PGVECTOR_TABLE_NAME:vector_store}
+        dimensions: ${DASHSCOPE_EMBEDDING_DIMENSIONS:1024}
+        distance-type: COSINE_DISTANCE
+        index-type: HNSW
+        max-document-batch-size: 1000
 
 story2script:
+  auth:
+    cookie-name: ${AUTH_COOKIE_NAME:story2script_session}
+    cookie-secure: ${AUTH_COOKIE_SECURE:false}
+    token-secret: ${AUTH_TOKEN_SECRET:change-this-local-secret-at-least-32-chars}
+    token-ttl-seconds: ${AUTH_TOKEN_TTL_SECONDS:604800}
+    registration-invite-code: ${REGISTRATION_INVITE_CODE:dev-invite}
   ai:
     openai:
       enabled: true
+  rag:
+    vector-store-enabled: ${STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED:true}
+    sync-on-startup: ${STORY2SCRIPT_RAG_SYNC_ON_STARTUP:false}
+    top-k: ${STORY2SCRIPT_RAG_TOP_K:3}
+    similarity-threshold: ${STORY2SCRIPT_RAG_SIMILARITY_THRESHOLD:0.0}
 
 server:
   port: 8080

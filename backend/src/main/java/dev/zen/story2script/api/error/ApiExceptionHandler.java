@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 // 统一 API 错误响应，保证客户端始终收到稳定的 { code, message } 结构。
-@RestControllerAdvice(basePackages = "dev.zen.story2script.api")
+@RestControllerAdvice(basePackages = "dev.zen.story2script")
 class ApiExceptionHandler {
 
     @ExceptionHandler(ApiException.class)

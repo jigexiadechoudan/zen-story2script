@@ -18,6 +18,19 @@ spring:
       chat:
         options:
           model: ${OPENAI_MODEL:gpt-4.1-mini}
+    vectorstore:
+      type: ${SPRING_AI_VECTORSTORE_TYPE:none}
+  datasource:
+    url: ${DATABASE_URL:jdbc:h2:mem:story2script;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}
+    username: ${DATABASE_USERNAME:sa}
+    password: ${DATABASE_PASSWORD:}
+    driver-class-name: ${DATABASE_DRIVER:org.h2.Driver}
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
 
 server:
   port: ${SERVER_PORT:8080}
@@ -25,5 +38,16 @@ server:
 story2script:
   agent:
     max-steps: ${STORY2SCRIPT_AGENT_MAX_STEPS:8}
+  rag:
+    vector-store-enabled: ${STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED:false}
+    sync-on-startup: ${STORY2SCRIPT_RAG_SYNC_ON_STARTUP:false}
+    top-k: ${STORY2SCRIPT_RAG_TOP_K:3}
+    similarity-threshold: ${STORY2SCRIPT_RAG_SIMILARITY_THRESHOLD:0.0}
   yaml:
     schema-version: "1.0"
+  auth:
+    cookie-name: ${AUTH_COOKIE_NAME:story2script_session}
+    cookie-secure: ${AUTH_COOKIE_SECURE:false}
+    token-secret: ${AUTH_TOKEN_SECRET:dev-only-change-this-secret-at-least-32-chars}
+    token-ttl-seconds: ${AUTH_TOKEN_TTL_SECONDS:604800}
+    registration-invite-code: ${REGISTRATION_INVITE_CODE:dev-invite}

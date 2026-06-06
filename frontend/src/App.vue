@@ -1,6 +1,6 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
-import { ApiError, convertNovel } from './api'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ApiError, convertNovel, getCurrentUser, login, logout, register } from './api'
 
 const targetOptions = [
   { value: 'short_drama', label: '短剧' },
@@ -21,11 +21,24 @@ const form = reactive({
   conversionMode: 'fast'
 })
 
+const authForm = reactive({
+  email: '',
+  password: '',
+  displayName: '',
+  inviteCode: ''
+})
+
 const loading = ref(false)
+const authLoading = ref(false)
+const authChecking = ref(true)
 const errorMessage = ref('')
+const authErrorMessage = ref('')
 const result = ref(null)
 const actionMessage = ref('')
+const authActionMessage = ref('')
 const locale = ref('zh')
+const authMode = ref('login')
+const currentUser = ref(null)
 const streamSteps = ref([])
 const elapsedSeconds = ref(0)
 let elapsedTimer = null
@@ -235,6 +248,61 @@ const messages = {
 }
 
 const t = computed(() => messages[locale.value])
+const authText = computed(() => {
+  if (locale.value === 'en') {
+    return {
+      kicker: 'Account',
+      title: 'Sign in to use the conversion workspace',
+      checking: 'Checking sign-in status...',
+      loginTab: 'Sign in',
+      registerTab: 'Register',
+      emailLabel: 'Email',
+      emailPlaceholder: 'writer@example.com',
+      passwordLabel: 'Password',
+      passwordPlaceholder: 'At least 8 characters',
+      displayNameLabel: 'Display name',
+      displayNamePlaceholder: 'Screenwriter',
+      inviteCodeLabel: 'Invite code',
+      inviteCodePlaceholder: 'Enter your private invite code',
+      loginButton: 'Sign in',
+      registerButton: 'Register and sign in',
+      logoutButton: 'Sign out',
+      signedInAs: 'Signed in as',
+      ready: 'Signed in. You can start converting.',
+      requireEmail: 'Please enter your email.',
+      requirePassword: 'Please enter your password.',
+      requirePasswordLength: 'Password must be at least 8 characters.',
+      requireDisplayName: 'Please enter a display name.',
+      requireInviteCode: 'Please enter the registration invite code.'
+    }
+  }
+
+  return {
+    kicker: '账号',
+    title: '登录后使用转换工作台',
+    checking: '正在检查登录状态...',
+    loginTab: '登录',
+    registerTab: '注册',
+    emailLabel: '邮箱',
+    emailPlaceholder: 'writer@example.com',
+    passwordLabel: '密码',
+    passwordPlaceholder: '至少 8 位',
+    displayNameLabel: '昵称',
+    displayNamePlaceholder: '编剧工作者',
+    inviteCodeLabel: '注册邀请码',
+    inviteCodePlaceholder: '输入私有邀请码',
+    loginButton: '登录',
+    registerButton: '注册并登录',
+    logoutButton: '退出',
+    signedInAs: '当前账号',
+    ready: '已登录，可以开始转换。',
+    requireEmail: '请填写邮箱。',
+    requirePassword: '请填写密码。',
+    requirePasswordLength: '密码至少 8 位。',
+    requireDisplayName: '请填写昵称。',
+    requireInviteCode: '请填写注册邀请码。'
+  }
+})
 
 const chapterCount = computed(() => estimateChapterCount(form.sourceText))
 const sourceLength = computed(() => form.sourceText.trim().length)
@@ -293,6 +361,78 @@ const statusMessages = computed(() => {
     result.value.backendFallbackMessage
   ].filter(Boolean)
 })
+const isRegistering = computed(() => authMode.value === 'register')
+const authSubmitLabel = computed(() => (isRegistering.value ? authText.value.registerButton : authText.value.loginButton))
+
+onMounted(async () => {
+  try {
+    currentUser.value = await getCurrentUser()
+  } catch {
+    currentUser.value = null
+  } finally {
+    authChecking.value = false
+  }
+})
+
+async function handleAuthSubmit() {
+  authErrorMessage.value = ''
+  authActionMessage.value = ''
+
+  const validationMessage = validateAuthForm()
+  if (validationMessage) {
+    authErrorMessage.value = validationMessage
+    return
+  }
+
+  authLoading.value = true
+  try {
+    if (isRegistering.value) {
+      currentUser.value = await register({
+        email: authForm.email.trim(),
+        password: authForm.password,
+        displayName: authForm.displayName.trim(),
+        inviteCode: authForm.inviteCode.trim()
+      })
+    } else {
+      currentUser.value = await login({
+        email: authForm.email.trim(),
+        password: authForm.password
+      })
+    }
+    authForm.password = ''
+    authActionMessage.value = authText.value.ready
+  } catch (error) {
+    if (error instanceof ApiError) {
+      authErrorMessage.value = error.message
+    } else {
+      authErrorMessage.value = t.value.networkFailed
+    }
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function handleLogout() {
+  authErrorMessage.value = ''
+  authActionMessage.value = ''
+  try {
+    await logout()
+  } catch {
+    // Keep logout usable even if the session has already expired server-side.
+  } finally {
+    currentUser.value = null
+    result.value = null
+    streamSteps.value = []
+    stopElapsedTimer()
+    loading.value = false
+  }
+}
+
+function switchAuthMode(mode) {
+  authMode.value = mode
+  authErrorMessage.value = ''
+  authActionMessage.value = ''
+}
 
 async function handleConvert() {
   errorMessage.value = ''
@@ -387,6 +527,30 @@ function validateForm() {
   return ''
 }
 
+function validateAuthForm() {
+  if (!authForm.email.trim()) {
+    return authText.value.requireEmail
+  }
+
+  if (!authForm.password) {
+    return authText.value.requirePassword
+  }
+
+  if (authForm.password.length < 8) {
+    return authText.value.requirePasswordLength
+  }
+
+  if (isRegistering.value && !authForm.displayName.trim()) {
+    return authText.value.requireDisplayName
+  }
+
+  if (isRegistering.value && !authForm.inviteCode.trim()) {
+    return authText.value.requireInviteCode
+  }
+
+  return ''
+}
+
 function formatTraceStep(step) {
   const text = String(step || '')
   if (text === 'conversion_started') {
@@ -454,6 +618,13 @@ function sanitizeFileName(value) {
         <h1 id="page-title">{{ t.appTitle }}</h1>
       </div>
       <div class="header-tools">
+        <div v-if="currentUser" class="account-strip" :aria-label="authText.signedInAs">
+          <span>{{ authText.signedInAs }}</span>
+          <strong>{{ currentUser.displayName || currentUser.email }}</strong>
+          <button type="button" class="secondary-button compact" @click="handleLogout">
+            {{ authText.logoutButton }}
+          </button>
+        </div>
         <div class="language-toggle" aria-label="Language">
           <button
             v-for="option in localeOptions"
@@ -472,7 +643,71 @@ function sanitizeFileName(value) {
       </div>
     </section>
 
-    <section class="workspace-grid" :aria-label="t.workspace">
+    <section v-if="authChecking" class="panel auth-panel auth-panel-compact" role="status">
+      <p class="section-kicker">{{ authText.kicker }}</p>
+      <h2>{{ authText.checking }}</h2>
+    </section>
+
+    <section v-else-if="!currentUser" class="panel auth-panel" aria-labelledby="auth-title">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">{{ authText.kicker }}</p>
+          <h2 id="auth-title">{{ authText.title }}</h2>
+        </div>
+        <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
+          <button
+            type="button"
+            :class="{ active: authMode === 'login' }"
+            @click="switchAuthMode('login')"
+          >
+            {{ authText.loginTab }}
+          </button>
+          <button
+            type="button"
+            :class="{ active: authMode === 'register' }"
+            @click="switchAuthMode('register')"
+          >
+            {{ authText.registerTab }}
+          </button>
+        </div>
+      </div>
+
+      <form class="auth-form" @submit.prevent="handleAuthSubmit">
+        <label class="field">
+          <span>{{ authText.emailLabel }}</span>
+          <input v-model="authForm.email" type="text" :placeholder="authText.emailPlaceholder" autocomplete="email" />
+        </label>
+
+        <label v-if="isRegistering" class="field">
+          <span>{{ authText.displayNameLabel }}</span>
+          <input v-model="authForm.displayName" type="text" :placeholder="authText.displayNamePlaceholder" autocomplete="name" />
+        </label>
+
+        <label class="field">
+          <span>{{ authText.passwordLabel }}</span>
+          <input v-model="authForm.password" type="password" :placeholder="authText.passwordPlaceholder" autocomplete="current-password" />
+        </label>
+
+        <label v-if="isRegistering" class="field">
+          <span>{{ authText.inviteCodeLabel }}</span>
+          <input v-model="authForm.inviteCode" type="text" :placeholder="authText.inviteCodePlaceholder" autocomplete="off" />
+        </label>
+
+        <div v-if="authErrorMessage" class="message error" role="alert">
+          {{ authErrorMessage }}
+        </div>
+
+        <div v-if="authActionMessage" class="message success" role="status">
+          {{ authActionMessage }}
+        </div>
+
+        <button class="primary-button" type="submit" :disabled="authLoading">
+          {{ authSubmitLabel }}
+        </button>
+      </form>
+    </section>
+
+    <section v-else class="workspace-grid" :aria-label="t.workspace">
       <form class="panel input-panel" @submit.prevent="handleConvert">
         <div class="panel-heading">
           <div>

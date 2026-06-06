@@ -1,6 +1,8 @@
 package dev.zen.story2script.tools;
 
+import dev.zen.story2script.rag.RagKnowledgeService;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -12,9 +14,16 @@ import org.springframework.stereotype.Component;
 public class ScenePlanningTool {
 
     private final ToolLlmClient llmClient;
+    private final RagKnowledgeService ragKnowledgeService;
 
     public ScenePlanningTool(ToolLlmClient llmClient) {
+        this(llmClient, RagKnowledgeService.DISABLED);
+    }
+
+    @Autowired
+    public ScenePlanningTool(ToolLlmClient llmClient, RagKnowledgeService ragKnowledgeService) {
         this.llmClient = llmClient;
+        this.ragKnowledgeService = ragKnowledgeService == null ? RagKnowledgeService.DISABLED : ragKnowledgeService;
     }
 
     /**
@@ -57,14 +66,33 @@ public class ScenePlanningTool {
                 Title: %s
                 Target format: %s
                 Target duration: %s
+                RAG knowledge:
+                %s
                 Story analysis JSON:
                 %s
                 """.formatted(
                 input.title(),
                 ToolInputs.nullToEmpty(input.targetFormat()),
                 ToolInputs.nullToEmpty(input.targetDuration()),
+                ragKnowledge(input),
                 input.analysisJson()
         );
+    }
+
+    private String ragKnowledge(ScenePlanningInput input) {
+        String query = """
+                title=%s
+                target_format=%s
+                target_duration=%s
+                analysis=%s
+                """.formatted(
+                input.title(),
+                ToolInputs.nullToEmpty(input.targetFormat()),
+                ToolInputs.nullToEmpty(input.targetDuration()),
+                input.analysisJson()
+        );
+        String context = ragKnowledgeService.promptContext(input.targetFormat(), "scene_planning", query);
+        return context.isBlank() ? "No retrieved adaptation knowledge." : context;
     }
 
     public record ScenePlanningInput(

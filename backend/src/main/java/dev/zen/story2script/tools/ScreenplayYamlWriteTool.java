@@ -1,7 +1,9 @@
 package dev.zen.story2script.tools;
 
+import dev.zen.story2script.rag.RagKnowledgeService;
 import dev.zen.story2script.schema.ScreenplayYamlSchema;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -14,9 +16,16 @@ import org.springframework.stereotype.Component;
 public class ScreenplayYamlWriteTool {
 
     private final ToolLlmClient llmClient;
+    private final RagKnowledgeService ragKnowledgeService;
 
     public ScreenplayYamlWriteTool(ToolLlmClient llmClient) {
+        this(llmClient, RagKnowledgeService.DISABLED);
+    }
+
+    @Autowired
+    public ScreenplayYamlWriteTool(ToolLlmClient llmClient, RagKnowledgeService ragKnowledgeService) {
         this.llmClient = llmClient;
+        this.ragKnowledgeService = ragKnowledgeService == null ? RagKnowledgeService.DISABLED : ragKnowledgeService;
     }
 
     /**
@@ -76,6 +85,8 @@ public class ScreenplayYamlWriteTool {
                 Target format: %s
                 Target duration: %s
                 Style hint: %s
+                RAG knowledge:
+                %s
                 Story analysis JSON:
                 %s
                 Scene plan JSON:
@@ -87,6 +98,7 @@ public class ScreenplayYamlWriteTool {
                 ToolInputs.nullToEmpty(input.targetFormat()),
                 ToolInputs.nullToEmpty(input.targetDuration()),
                 ToolInputs.nullToEmpty(input.styleHint()),
+                ragKnowledge(input),
                 input.analysisJson(),
                 input.scenePlanJson()
         );
@@ -122,6 +134,8 @@ public class ScreenplayYamlWriteTool {
                 Target format: %s
                 Target duration: %s
                 Style hint: %s
+                RAG knowledge:
+                %s
 
                 Parsed chapters:
                 %s
@@ -132,8 +146,43 @@ public class ScreenplayYamlWriteTool {
                 ToolInputs.nullToEmpty(input.targetFormat()),
                 ToolInputs.nullToEmpty(input.targetDuration()),
                 ToolInputs.nullToEmpty(input.styleHint()),
+                ragKnowledge(input),
                 formatChapters(input.chapters())
         );
+    }
+
+    private String ragKnowledge(ScreenplayYamlWriteInput input) {
+        String query = """
+                title=%s
+                target_format=%s
+                style_hint=%s
+                analysis=%s
+                scene_plan=%s
+                """.formatted(
+                input.title(),
+                ToolInputs.nullToEmpty(input.targetFormat()),
+                ToolInputs.nullToEmpty(input.styleHint()),
+                input.analysisJson(),
+                input.scenePlanJson()
+        );
+        String context = ragKnowledgeService.promptContext(input.targetFormat(), "yaml_writing", query);
+        return context.isBlank() ? "No retrieved adaptation knowledge." : context;
+    }
+
+    private String ragKnowledge(FastScreenplayYamlWriteInput input) {
+        String query = """
+                title=%s
+                target_format=%s
+                style_hint=%s
+                chapters=%s
+                """.formatted(
+                input.title(),
+                ToolInputs.nullToEmpty(input.targetFormat()),
+                ToolInputs.nullToEmpty(input.styleHint()),
+                formatChapters(input.chapters())
+        );
+        String context = ragKnowledgeService.promptContext(input.targetFormat(), "yaml_writing", query);
+        return context.isBlank() ? "No retrieved adaptation knowledge." : context;
     }
 
     private String formatChapters(java.util.List<ChapterParseTool.ParsedChapter> chapters) {

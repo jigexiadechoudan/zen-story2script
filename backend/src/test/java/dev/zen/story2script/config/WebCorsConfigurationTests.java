@@ -28,6 +28,7 @@ class WebCorsConfigurationTests {
                         .header("Access-Control-Request-Headers", "Content-Type, Authorization"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
                 .andExpect(header().string("Access-Control-Allow-Methods", containsString("POST")))
                 .andExpect(header().string("Access-Control-Allow-Headers", containsString("Content-Type")))
                 .andExpect(header().string("Access-Control-Allow-Headers", containsString("Authorization")));
