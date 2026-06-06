@@ -1,6 +1,16 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { motion } from 'motion-v'
 import { ApiError, convertNovel, getCurrentUser, login, logout, register } from './api'
+import AppHeader from './components/AppHeader.vue'
+import AuthPanel from './components/AuthPanel.vue'
+import ConversionForm from './components/ConversionForm.vue'
+import ModeSelector from './components/ModeSelector.vue'
+import ProgressTimeline from './components/ProgressTimeline.vue'
+import QualityPanel from './components/QualityPanel.vue'
+import StatusBadge from './components/StatusBadge.vue'
+import WarningList from './components/WarningList.vue'
+import YamlPreview from './components/YamlPreview.vue'
 
 const targetOptions = [
   { value: 'short_drama', label: '短剧' },
@@ -9,8 +19,8 @@ const targetOptions = [
 ]
 
 const conversionModeOptions = [
-  { value: 'fast', label: '快速' },
-  { value: 'react', label: '完整' }
+  { value: 'fast', label: '快速模式' },
+  { value: 'react', label: '完整 ReAct' }
 ]
 
 const form = reactive({
@@ -50,13 +60,20 @@ const localeOptions = [
 
 const messages = {
   zh: {
+    productName: 'Zen Story2Script',
+    productSubtitle: '小说转结构化剧本 YAML',
     appTitle: '小说转剧本工作台',
+    connectionStatus: '连接状态',
+    backendConnected: '后端已连接',
+    backendPending: '等待后端结果',
+    localMock: '本地 mock',
+    devFallback: 'dev fallback',
     inputStatus: '输入状态',
     chapters: '章节',
     chars: '字',
-    workspace: '转换工作区',
-    inputKicker: '输入区',
-    inputTitle: '原文与改编目标',
+    workspace: '创作者 AI 剧本工作台',
+    inputKicker: 'Manuscript',
+    inputTitle: '输入原文',
     titleLabel: '小说标题',
     titlePlaceholder: '雾镇来信',
     sourceLabel: '小说正文',
@@ -68,13 +85,13 @@ const messages = {
     styleLabel: '风格提示',
     stylePlaceholder: '悬疑、现实主义、节奏紧凑',
     convertIdle: '开始转换',
-    convertLoading: '转换中...',
-    resultKicker: '结果区',
+    convertLoading: '智能体工作中',
+    resultKicker: 'Structured Draft',
     resultTitle: '结构化 YAML',
     copyYaml: '复制 YAML',
-    downloadYaml: '下载 YAML',
-    emptyYaml: '转换后将在这里预览 YAML 输出。',
-    streamingYaml: '智能体正在分阶段生成剧本，最终 YAML 将在完成后显示。',
+    downloadYaml: '下载剧本草稿',
+    emptyYaml: '转换完成后，这里会显示可复制、可下载的 YAML 剧本草稿。',
+    streamingYaml: '智能体正在分阶段生成剧本，最终 YAML 会在完成后显示。',
     agentTrace: '智能体步骤',
     qualityReport: '质量报告',
     warnings: '警告',
@@ -93,8 +110,10 @@ const messages = {
     networkFailed: '网络请求失败，请检查后端服务或稍后重试。',
     requireTitle: '请先填写小说标题。',
     requireSource: '请粘贴小说正文。',
-    requireChapters: '请至少输入 3 章小说文本，支持 # 第一章、## 第二章、Chapter 1 等标题格式。',
+    requireChapters: '至少需要 3 个章节后才能开始转换。支持“第一章”“# 第二章”“Chapter 1”等标题格式。',
     sourceTooShort: '小说正文过短，请补充每章的主要情节后再转换。',
+    chapterReady: '已满足章节要求',
+    chapterMissing: '至少需要 3 个章节后才能开始转换',
     targetOptions: {
       short_drama: '短剧',
       screenplay: '影视剧本',
@@ -105,8 +124,8 @@ const messages = {
       react: '完整 ReAct'
     },
     modeHints: {
-      fast: '1 次模型生成，适合联调和 demo。',
-      react: '多步分析规划，质量更细但更慢。'
+      fast: '单次生成，适合联调、预览和快速草稿。',
+      react: '章节解析、故事分析、场景规划与校验修复更完整。'
     },
     qualityKeys: {
       confidence: '置信度',
@@ -148,13 +167,20 @@ const messages = {
     }
   },
   en: {
+    productName: 'Zen Story2Script',
+    productSubtitle: 'Novel to structured screenplay YAML',
     appTitle: 'Novel to Screenplay Workspace',
+    connectionStatus: 'Connection status',
+    backendConnected: 'Backend connected',
+    backendPending: 'Awaiting backend result',
+    localMock: 'Local mock',
+    devFallback: 'dev fallback',
     inputStatus: 'Input status',
-    chapters: 'Chapters',
+    chapters: 'chapters',
     chars: 'chars',
-    workspace: 'Conversion workspace',
-    inputKicker: 'Input',
-    inputTitle: 'Source and adaptation target',
+    workspace: 'Creator AI screenplay workspace',
+    inputKicker: 'Manuscript',
+    inputTitle: 'Source text',
     titleLabel: 'Novel title',
     titlePlaceholder: 'Letter from Fog Town',
     sourceLabel: 'Novel text',
@@ -166,14 +192,14 @@ const messages = {
     styleLabel: 'Style hint',
     stylePlaceholder: 'Suspense, realism, tight pacing',
     convertIdle: 'Start conversion',
-    convertLoading: 'Converting...',
-    resultKicker: 'Result',
+    convertLoading: 'Agent at work',
+    resultKicker: 'Structured Draft',
     resultTitle: 'Structured YAML',
     copyYaml: 'Copy YAML',
-    downloadYaml: 'Download YAML',
-    emptyYaml: 'YAML output will appear here after conversion.',
+    downloadYaml: 'Download draft',
+    emptyYaml: 'The YAML screenplay draft will appear here after conversion.',
     streamingYaml: 'The agent is generating the screenplay in stages. Final YAML will appear when complete.',
-    agentTrace: 'Agent Trace',
+    agentTrace: 'Agent steps',
     qualityReport: 'Quality Report',
     warnings: 'Warnings',
     stepUnit: 'steps',
@@ -191,8 +217,10 @@ const messages = {
     networkFailed: 'Network request failed. Check the backend service and try again.',
     requireTitle: 'Please enter a novel title.',
     requireSource: 'Please paste the novel text.',
-    requireChapters: 'Please enter at least 3 chapters. Supported headings include # 第一章, ## 第二章, and Chapter 1.',
+    requireChapters: 'Please enter at least 3 chapters. Supported headings include 第一章, # 第二章, and Chapter 1.',
     sourceTooShort: 'The novel text is too short. Add the main events for each chapter before converting.',
+    chapterReady: 'Chapter requirement met',
+    chapterMissing: 'At least 3 chapters are required before conversion',
     targetOptions: {
       short_drama: 'Short Drama',
       screenplay: 'Screenplay',
@@ -203,8 +231,8 @@ const messages = {
       react: 'Full ReAct'
     },
     modeHints: {
-      fast: 'One model generation for testing and demos.',
-      react: 'Multi-step analysis and planning, slower but richer.'
+      fast: 'Single generation for integration, preview, and quick drafts.',
+      react: 'Richer chapter parsing, story analysis, scene planning, validation, and repair.'
     },
     qualityKeys: {
       confidence: 'Confidence',
@@ -247,39 +275,10 @@ const messages = {
   }
 }
 
-const t = computed(() => messages[locale.value])
-const authText = computed(() => {
-  if (locale.value === 'en') {
-    return {
-      kicker: 'Account',
-      title: 'Sign in to use the conversion workspace',
-      checking: 'Checking sign-in status...',
-      loginTab: 'Sign in',
-      registerTab: 'Register',
-      emailLabel: 'Email',
-      emailPlaceholder: 'writer@example.com',
-      passwordLabel: 'Password',
-      passwordPlaceholder: 'At least 8 characters',
-      displayNameLabel: 'Display name',
-      displayNamePlaceholder: 'Screenwriter',
-      inviteCodeLabel: 'Invite code',
-      inviteCodePlaceholder: 'Enter your private invite code',
-      loginButton: 'Sign in',
-      registerButton: 'Register and sign in',
-      logoutButton: 'Sign out',
-      signedInAs: 'Signed in as',
-      ready: 'Signed in. You can start converting.',
-      requireEmail: 'Please enter your email.',
-      requirePassword: 'Please enter your password.',
-      requirePasswordLength: 'Password must be at least 8 characters.',
-      requireDisplayName: 'Please enter a display name.',
-      requireInviteCode: 'Please enter the registration invite code.'
-    }
-  }
-
-  return {
-    kicker: '账号',
-    title: '登录后使用转换工作台',
+const authMessages = {
+  zh: {
+    kicker: 'Studio Access',
+    title: '登录后进入创作者工作台',
     checking: '正在检查登录状态...',
     loginTab: '登录',
     registerTab: '注册',
@@ -291,21 +290,53 @@ const authText = computed(() => {
     displayNamePlaceholder: '编剧工作者',
     inviteCodeLabel: '注册邀请码',
     inviteCodePlaceholder: '输入私有邀请码',
-    loginButton: '登录',
+    loginButton: '登录工作台',
     registerButton: '注册并登录',
-    logoutButton: '退出',
-    signedInAs: '当前账号',
+    logoutButton: '登出',
+    signedInAs: '当前用户',
     ready: '已登录，可以开始转换。',
     requireEmail: '请填写邮箱。',
     requirePassword: '请填写密码。',
     requirePasswordLength: '密码至少 8 位。',
     requireDisplayName: '请填写昵称。',
-    requireInviteCode: '请填写注册邀请码。'
+    requireInviteCode: '请填写注册邀请码。',
+    flowNovel: '小说手稿',
+    flowAgent: 'Agent 工作流'
+  },
+  en: {
+    kicker: 'Studio Access',
+    title: 'Sign in to enter the creator workspace',
+    checking: 'Checking sign-in status...',
+    loginTab: 'Sign in',
+    registerTab: 'Register',
+    emailLabel: 'Email',
+    emailPlaceholder: 'writer@example.com',
+    passwordLabel: 'Password',
+    passwordPlaceholder: 'At least 8 characters',
+    displayNameLabel: 'Display name',
+    displayNamePlaceholder: 'Screenwriter',
+    inviteCodeLabel: 'Invite code',
+    inviteCodePlaceholder: 'Enter your private invite code',
+    loginButton: 'Sign in',
+    registerButton: 'Register and sign in',
+    logoutButton: 'Sign out',
+    signedInAs: 'Current user',
+    ready: 'Signed in. You can start converting.',
+    requireEmail: 'Please enter your email.',
+    requirePassword: 'Please enter your password.',
+    requirePasswordLength: 'Password must be at least 8 characters.',
+    requireDisplayName: 'Please enter a display name.',
+    requireInviteCode: 'Please enter the registration invite code.',
+    flowNovel: 'Novel manuscript',
+    flowAgent: 'Agent workflow'
   }
-})
+}
 
+const t = computed(() => messages[locale.value])
+const authText = computed(() => authMessages[locale.value])
 const chapterCount = computed(() => estimateChapterCount(form.sourceText))
 const sourceLength = computed(() => form.sourceText.trim().length)
+const minChaptersMet = computed(() => chapterCount.value >= 3)
 const hasYaml = computed(() => Boolean(result.value?.yaml))
 const localizedTargetOptions = computed(() =>
   targetOptions.map((option) => ({
@@ -360,6 +391,21 @@ const statusMessages = computed(() => {
     result.value.localMockMessage,
     result.value.backendFallbackMessage
   ].filter(Boolean)
+})
+const headerStatusBadges = computed(() => {
+  if (result.value?.usedMock) {
+    return [{ tone: 'warning', icon: 'offline', label: t.value.localMock }]
+  }
+
+  if (result.value?.usedBackendFallback) {
+    return [{ tone: 'warning', icon: 'warning', label: t.value.devFallback }]
+  }
+
+  if (loading.value) {
+    return [{ tone: 'neutral', icon: 'info', label: t.value.backendPending }]
+  }
+
+  return [{ tone: 'success', icon: 'online', label: t.value.backendConnected }]
 })
 const isRegistering = computed(() => authMode.value === 'register')
 const authSubmitLabel = computed(() => (isRegistering.value ? authText.value.registerButton : authText.value.loginButton))
@@ -554,7 +600,9 @@ function validateAuthForm() {
 function formatTraceStep(step) {
   const text = String(step || '')
   if (text === 'conversion_started') {
-    return locale.value === 'zh' ? '转换已启动，正在连接小说转剧本智能体。' : 'Conversion started. Connecting to the novel-to-screenplay agent.'
+    return locale.value === 'zh'
+      ? '转换已启动，正在连接小说转剧本智能体。'
+      : 'Conversion started. Connecting to the novel-to-screenplay agent.'
   }
   const match = text.match(/^\s*(?:\d+\.\s*)?([a-z_]+):\s*(.*)$/i)
   if (!match) {
@@ -563,7 +611,7 @@ function formatTraceStep(step) {
   const action = match[1]
   const label = t.value.traceLabels[action] || action
   const message = t.value.traceMessages[action] || match[2]
-  return `${label}：${message}`
+  return `${label}: ${message}`
 }
 
 function formatQualityValue(key, value) {
@@ -572,6 +620,9 @@ function formatQualityValue(key, value) {
   }
   if (typeof value === 'boolean') {
     return locale.value === 'zh' ? (value ? '是' : '否') : String(value)
+  }
+  if (key === 'conversionMode') {
+    return t.value.modeOptions[value] || value
   }
   return value
 }
@@ -601,7 +652,9 @@ function formatDuration(totalSeconds) {
 }
 
 function estimateChapterCount(sourceText) {
-  const matches = sourceText.match(/(^|\n)\s*(#{1,6}\s*)?(第\s*[一二三四五六七八九十百千万零〇两\d０-９]+\s*[章节回]|chapter\s+\d+)/gi)
+  const matches = sourceText.match(
+    /(^|\n)\s*(#{1,6}\s*)?((第\s*[一二三四五六七八九十百千万零〇两\d]+\s*[章节回卷])|(chapter\s+\d+))/gi
+  )
   return matches?.length || 0
 }
 
@@ -612,165 +665,71 @@ function sanitizeFileName(value) {
 
 <template>
   <main class="workspace-shell">
-    <section class="workspace-header" aria-labelledby="page-title">
-      <div>
-        <p class="eyebrow">Zen Story2Script MVP</p>
-        <h1 id="page-title">{{ t.appTitle }}</h1>
-      </div>
-      <div class="header-tools">
-        <div v-if="currentUser" class="account-strip" :aria-label="authText.signedInAs">
-          <span>{{ authText.signedInAs }}</span>
-          <strong>{{ currentUser.displayName || currentUser.email }}</strong>
-          <button type="button" class="secondary-button compact" @click="handleLogout">
-            {{ authText.logoutButton }}
-          </button>
-        </div>
-        <div class="language-toggle" aria-label="Language">
-          <button
-            v-for="option in localeOptions"
-            :key="option.value"
-            type="button"
-            :class="{ active: locale === option.value }"
-            @click="locale = option.value"
-          >
-            {{ option.label }}
-          </button>
-        </div>
-        <div class="status-strip" :aria-label="t.inputStatus">
-          <span>{{ t.chapters }} {{ chapterCount }}</span>
-          <span>{{ sourceLength }} {{ t.chars }}</span>
-        </div>
-      </div>
-    </section>
+    <AppHeader
+      v-model:locale="locale"
+      :current-user="currentUser"
+      :locale-options="localeOptions"
+      :auth-text="authText"
+      :text="t"
+      :status-badges="headerStatusBadges"
+      @logout="handleLogout"
+    />
 
-    <section v-if="authChecking" class="panel auth-panel auth-panel-compact" role="status">
-      <p class="section-kicker">{{ authText.kicker }}</p>
-      <h2>{{ authText.checking }}</h2>
-    </section>
-
-    <section v-else-if="!currentUser" class="panel auth-panel" aria-labelledby="auth-title">
-      <div class="panel-heading">
-        <div>
-          <p class="section-kicker">{{ authText.kicker }}</p>
-          <h2 id="auth-title">{{ authText.title }}</h2>
-        </div>
-        <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
-          <button
-            type="button"
-            :class="{ active: authMode === 'login' }"
-            @click="switchAuthMode('login')"
-          >
-            {{ authText.loginTab }}
-          </button>
-          <button
-            type="button"
-            :class="{ active: authMode === 'register' }"
-            @click="switchAuthMode('register')"
-          >
-            {{ authText.registerTab }}
-          </button>
-        </div>
-      </div>
-
-      <form class="auth-form" @submit.prevent="handleAuthSubmit">
-        <label class="field">
-          <span>{{ authText.emailLabel }}</span>
-          <input v-model="authForm.email" type="text" :placeholder="authText.emailPlaceholder" autocomplete="email" />
-        </label>
-
-        <label v-if="isRegistering" class="field">
-          <span>{{ authText.displayNameLabel }}</span>
-          <input v-model="authForm.displayName" type="text" :placeholder="authText.displayNamePlaceholder" autocomplete="name" />
-        </label>
-
-        <label class="field">
-          <span>{{ authText.passwordLabel }}</span>
-          <input v-model="authForm.password" type="password" :placeholder="authText.passwordPlaceholder" autocomplete="current-password" />
-        </label>
-
-        <label v-if="isRegistering" class="field">
-          <span>{{ authText.inviteCodeLabel }}</span>
-          <input v-model="authForm.inviteCode" type="text" :placeholder="authText.inviteCodePlaceholder" autocomplete="off" />
-        </label>
-
-        <div v-if="authErrorMessage" class="message error" role="alert">
-          {{ authErrorMessage }}
-        </div>
-
-        <div v-if="authActionMessage" class="message success" role="status">
-          {{ authActionMessage }}
-        </div>
-
-        <button class="primary-button" type="submit" :disabled="authLoading">
-          {{ authSubmitLabel }}
-        </button>
-      </form>
-    </section>
+    <AuthPanel
+      v-if="authChecking || !currentUser"
+      :checking="authChecking"
+      :auth-form="authForm"
+      :auth-text="authText"
+      :auth-mode="authMode"
+      :is-registering="isRegistering"
+      :auth-loading="authLoading"
+      :auth-submit-label="authSubmitLabel"
+      :auth-error-message="authErrorMessage"
+      :auth-action-message="authActionMessage"
+      @submit="handleAuthSubmit"
+      @switch-mode="switchAuthMode"
+    />
 
     <section v-else class="workspace-grid" :aria-label="t.workspace">
-      <form class="panel input-panel" @submit.prevent="handleConvert">
-        <div class="panel-heading">
-          <div>
-            <p class="section-kicker">{{ t.inputKicker }}</p>
-            <h2>{{ t.inputTitle }}</h2>
-          </div>
-        </div>
+      <ConversionForm
+        :form="form"
+        :text="t"
+        :target-options="localizedTargetOptions"
+        :chapter-count="chapterCount"
+        :source-length="sourceLength"
+        :min-chapters-met="minChaptersMet"
+        :loading="loading"
+        :error-message="errorMessage"
+        @submit="handleConvert"
+      />
 
-        <label class="field">
-          <span>{{ t.titleLabel }}</span>
-          <input v-model="form.title" type="text" :placeholder="t.titlePlaceholder" autocomplete="off" />
-        </label>
-
-        <label class="field grow">
-          <span>{{ t.sourceLabel }}</span>
-          <textarea
-            v-model="form.sourceText"
-            :placeholder="t.sourcePlaceholder"
+      <motion.section
+        class="studio-panel result-panel"
+        :aria-label="t.resultKicker"
+        :initial="{ opacity: 0, y: 24 }"
+        :animate="{ opacity: 1, y: 0 }"
+        :transition="{ duration: 0.58, delay: 0.16, ease: [0.22, 1, 0.36, 1] }"
+      >
+        <div class="result-control-row">
+          <ModeSelector
+            v-model="form.conversionMode"
+            :options="localizedConversionModeOptions"
+            :label="t.modeLabel"
           />
-        </label>
 
-        <fieldset class="format-group">
-          <legend>{{ t.targetLabel }}</legend>
-          <label v-for="option in localizedTargetOptions" :key="option.value" class="format-option">
-            <input v-model="form.targetFormat" type="radio" name="targetFormat" :value="option.value" />
-            <span>{{ option.label }}</span>
-          </label>
-        </fieldset>
-
-        <fieldset class="mode-group">
-          <legend>{{ t.modeLabel }}</legend>
-          <label v-for="option in localizedConversionModeOptions" :key="option.value" class="mode-option">
-            <input v-model="form.conversionMode" type="radio" name="conversionMode" :value="option.value" />
-            <span>
-              <strong>{{ option.label }}</strong>
-              <small>{{ option.hint }}</small>
-            </span>
-          </label>
-        </fieldset>
-
-        <label class="field">
-          <span>{{ t.styleLabel }}</span>
-          <input v-model="form.styleHint" type="text" :placeholder="t.stylePlaceholder" />
-        </label>
-
-        <div v-if="errorMessage" class="message error" role="alert">
-          {{ errorMessage }}
-        </div>
-
-        <button class="primary-button" type="submit" :disabled="loading">
-          {{ loading ? t.convertLoading : t.convertIdle }}
-        </button>
-      </form>
-
-      <section class="panel result-panel" :aria-label="t.resultKicker">
-        <div class="panel-heading result-heading">
-          <div>
-            <p class="section-kicker">{{ t.resultKicker }}</p>
-            <h2>{{ t.resultTitle }}</h2>
-          </div>
-          <div class="button-row">
-            <button type="button" class="secondary-button" :disabled="!hasYaml" @click="copyYaml">{{ t.copyYaml }}</button>
-            <button type="button" class="secondary-button" :disabled="!hasYaml" @click="downloadYaml">{{ t.downloadYaml }}</button>
+          <div class="run-status" :class="{ active: loading }" role="status">
+            <div>
+              <span>{{ t.modeSummary }}</span>
+              <strong>{{ activeModeLabel }}</strong>
+            </div>
+            <div>
+              <span>{{ t.elapsed }}</span>
+              <strong>{{ elapsedText }}</strong>
+            </div>
+            <div class="run-status-step">
+              <span>{{ loading ? t.currentStep : t.progressTitle }}</span>
+              <strong>{{ loading ? currentStepText : (localizedAgentTrace.length ? t.finalizing : t.noTrace) }}</strong>
+            </div>
           </div>
         </div>
 
@@ -778,65 +737,52 @@ function sanitizeFileName(value) {
           {{ actionMessage }}
         </div>
 
-        <div v-for="message in statusMessages" :key="message" class="message notice" role="status">
-          {{ message }}
+        <div v-if="statusMessages.length" class="status-message-stack">
+          <StatusBadge
+            v-for="message in statusMessages"
+            :key="message"
+            tone="warning"
+            icon="warning"
+            :label="message"
+          />
         </div>
 
-        <div class="run-status" :class="{ active: loading }" role="status">
-          <div>
-            <span>{{ t.modeSummary }}</span>
-            <strong>{{ activeModeLabel }}</strong>
-          </div>
-          <div>
-            <span>{{ t.elapsed }}</span>
-            <strong>{{ elapsedText }}</strong>
-          </div>
-          <div class="run-status-step">
-            <span>{{ loading ? t.currentStep : t.progressTitle }}</span>
-            <strong>{{ loading ? currentStepText : (localizedAgentTrace.length ? t.finalizing : t.noTrace) }}</strong>
-          </div>
-        </div>
-
-        <pre class="yaml-preview" :class="{ empty: !hasYaml, streaming: loading }">{{ yamlPreviewText }}</pre>
+        <YamlPreview
+          :kicker="t.resultKicker"
+          :title="t.resultTitle"
+          :yaml-text="yamlPreviewText"
+          :has-yaml="hasYaml"
+          :loading="loading"
+          :copy-label="t.copyYaml"
+          :download-label="t.downloadYaml"
+          @copy="copyYaml"
+          @download="downloadYaml"
+        />
 
         <div class="insight-grid">
-          <article class="info-block">
-            <div class="info-title">
-              <h3>{{ t.agentTrace }}</h3>
-              <span>{{ localizedAgentTrace.length }} {{ t.stepUnit }}</span>
-            </div>
-            <ol v-if="localizedAgentTrace.length" class="trace-list">
-              <li v-for="step in localizedAgentTrace" :key="step">{{ step }}</li>
-            </ol>
-            <p v-else class="empty-text">{{ t.noTrace }}</p>
-          </article>
+          <ProgressTimeline
+            :title="t.agentTrace"
+            :steps="localizedAgentTrace"
+            :empty-text="t.noTrace"
+            :step-unit="t.stepUnit"
+            :loading="loading"
+          />
 
-          <article class="info-block">
-            <div class="info-title">
-              <h3>{{ t.qualityReport }}</h3>
-              <span>v{{ result?.schemaVersion || '1.0' }}</span>
-            </div>
-            <dl v-if="localizedQualityEntries.length" class="metric-list">
-              <template v-for="entry in localizedQualityEntries" :key="entry.key">
-                <dt>{{ entry.label }}</dt>
-                <dd>{{ entry.value }}</dd>
-              </template>
-            </dl>
-            <p v-else class="empty-text">{{ t.noQuality }}</p>
-          </article>
+          <QualityPanel
+            :title="t.qualityReport"
+            :entries="localizedQualityEntries"
+            :schema-version="result?.schemaVersion || '1.0'"
+            :empty-text="t.noQuality"
+          />
         </div>
 
-        <article class="info-block warning-block">
-          <div class="info-title">
-            <h3>{{ t.warnings }}</h3>
-            <span>{{ result?.warnings?.length || 0 }} {{ t.warningUnit }}</span>
-          </div>
-          <ul v-if="result?.warnings?.length" class="warning-list">
-            <li v-for="warning in result.warnings" :key="warning">{{ warning }}</li>
-          </ul>
-          <p v-else class="empty-text">{{ t.noWarnings }}</p>
-        </article>
-      </section>
+        <WarningList
+          :title="t.warnings"
+          :warnings="result?.warnings || []"
+          :warning-unit="t.warningUnit"
+          :empty-text="t.noWarnings"
+        />
+      </motion.section>
     </section>
   </main>
 </template>

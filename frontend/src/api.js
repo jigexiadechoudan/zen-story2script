@@ -370,7 +370,9 @@ function createMockResponse(payload, error) {
 }
 
 function estimateChapterCount(sourceText) {
-  const matches = sourceText.match(/(^|\n)\s*(#{1,6}\s*)?(第\s*[一二三四五六七八九十百千万零〇两\d０-９]+\s*[章节回]|chapter\s+\d+)/gi)
+  const matches = sourceText.match(
+    /(^|\n)\s*(#{1,6}\s*)?((第\s*[一二三四五六七八九十百千万零〇两\d]+\s*[章节回卷])|(chapter\s+\d+))/gi
+  )
   return matches?.length || 0
 }
 
