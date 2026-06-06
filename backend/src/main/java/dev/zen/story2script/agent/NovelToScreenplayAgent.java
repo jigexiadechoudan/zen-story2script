@@ -6,6 +6,7 @@ import dev.zen.story2script.tools.ChapterParseTool;
 import dev.zen.story2script.tools.ScenePlanningTool;
 import dev.zen.story2script.tools.ScreenplayYamlWriteTool;
 import dev.zen.story2script.tools.StoryAnalysisTool;
+import dev.zen.story2script.tools.ToolLlmClient;
 import dev.zen.story2script.tools.YamlRepairTool;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +31,7 @@ public class NovelToScreenplayAgent {
     private final YamlRepairTool yamlRepairTool;
     private final AgentPlanner planner;
     private final int maxToolCalls;
+    private final boolean devFallback;
 
     @Autowired
     public NovelToScreenplayAgent(
@@ -38,6 +40,7 @@ public class NovelToScreenplayAgent {
             ScenePlanningTool scenePlanningTool,
             ScreenplayYamlWriteTool screenplayYamlWriteTool,
             YamlRepairTool yamlRepairTool,
+            ToolLlmClient toolLlmClient,
             @Value("${story2script.agent.max-steps:8}") int maxToolCalls
     ) {
         this(
@@ -48,7 +51,8 @@ public class NovelToScreenplayAgent {
                 new YamlSchemaValidator(),
                 yamlRepairTool,
                 new RuleBasedAgentPlanner(),
-                maxToolCalls
+                maxToolCalls,
+                toolLlmClient.devFallback()
         );
     }
 
@@ -69,7 +73,8 @@ public class NovelToScreenplayAgent {
                 yamlSchemaValidator,
                 yamlRepairTool,
                 new RuleBasedAgentPlanner(),
-                maxToolCalls
+                maxToolCalls,
+                false
         );
     }
 
@@ -83,6 +88,30 @@ public class NovelToScreenplayAgent {
             AgentPlanner planner,
             int maxToolCalls
     ) {
+        this(
+                chapterParseTool,
+                storyAnalysisTool,
+                scenePlanningTool,
+                screenplayYamlWriteTool,
+                yamlSchemaValidator,
+                yamlRepairTool,
+                planner,
+                maxToolCalls,
+                false
+        );
+    }
+
+    NovelToScreenplayAgent(
+            ChapterParseTool chapterParseTool,
+            StoryAnalysisTool storyAnalysisTool,
+            ScenePlanningTool scenePlanningTool,
+            ScreenplayYamlWriteTool screenplayYamlWriteTool,
+            YamlSchemaValidator yamlSchemaValidator,
+            YamlRepairTool yamlRepairTool,
+            AgentPlanner planner,
+            int maxToolCalls,
+            boolean devFallback
+    ) {
         if (maxToolCalls < 1) {
             throw new IllegalArgumentException("maxToolCalls must be positive");
         }
@@ -94,10 +123,14 @@ public class NovelToScreenplayAgent {
         this.yamlRepairTool = yamlRepairTool;
         this.planner = planner;
         this.maxToolCalls = maxToolCalls;
+        this.devFallback = devFallback;
     }
 
     public AgentResult convert(AgentContext context) {
         AgentState state = new AgentState(context);
+        if (devFallback) {
+            enterDevFallback(state);
+        }
 
         try {
             while (true) {
@@ -140,7 +173,7 @@ public class NovelToScreenplayAgent {
                 new ChapterParseTool.ChapterParseInput(state.context().sourceText())
         );
         state.observeChapterParse(output);
-        state.replaceLastTraceSummary("Parsed %d chapters; valid=%s.".formatted(output.chapters().size(), output.valid()));
+        state.replaceLastTraceSummary(chapterParseSummary(output));
         if (!output.valid()) {
             state.warn(output.errorMessage());
         }
@@ -186,6 +219,9 @@ public class NovelToScreenplayAgent {
                 )
         );
         state.observeYamlWrite(output.yaml());
+        if (devFallback) {
+            state.replaceLastTraceSummary("已生成示例 YAML：使用请求元数据构造 dev fallback 演示输出。");
+        }
     }
 
     private void validateYaml(AgentState state) {
@@ -221,6 +257,10 @@ public class NovelToScreenplayAgent {
             if (state.checks().contains("yaml_repair")) {
                 state.warn("YAML was repaired after initial validation failure.");
             }
+            if (devFallback) {
+                state.recordTrace("dev_fallback", "未调用真实大模型。");
+                recordDevFallbackQuality(state);
+            }
             return successResult(state);
         }
         if (state.validationResult() != null && !state.validationResult().valid()) {
@@ -238,6 +278,62 @@ public class NovelToScreenplayAgent {
 
     private boolean canCallTool(AgentState state) {
         return state.toolCalls() < maxToolCalls;
+    }
+
+    private void enterDevFallback(AgentState state) {
+        state.warn("当前使用 dev fallback 演示输出。");
+        state.warn("未调用真实大模型。");
+        state.warn("配置 application-local.yml 后可启用真实模型。");
+        state.recordTrace("dev_fallback", "已进入 dev fallback：当前未配置真实 ChatModel。");
+    }
+
+    private String chapterParseSummary(ChapterParseTool.ChapterParseOutput output) {
+        if (devFallback) {
+            return "已解析章节：%d 章；valid=%s。".formatted(output.chapters().size(), output.valid());
+        }
+        return "Parsed %d chapters; valid=%s.".formatted(output.chapters().size(), output.valid());
+    }
+
+    private void recordDevFallbackQuality(AgentState state) {
+        int chapterCount = state.chapterParseOutput() == null ? 0 : state.chapterParseOutput().chapters().size();
+        int characterCount = countYamlListItems(state.yaml(), "characters");
+        int sceneCount = countYamlListItems(state.yaml(), "scenes");
+        state.addCheck("chapterCount=%d".formatted(chapterCount));
+        state.addCheck("characterCount=%d".formatted(characterCount));
+        state.addCheck("sceneCount=%d".formatted(sceneCount));
+        state.addCheck("reactSteps=%d".formatted(state.agentStepCount()));
+        state.addCheck("repaired=%s".formatted(state.checks().contains("yaml_repair")));
+    }
+
+    private int countYamlListItems(String yaml, String fieldName) {
+        String[] lines = yaml.split("\\R");
+        boolean inside = false;
+        int parentIndent = -1;
+        int count = 0;
+        for (String line : lines) {
+            int indent = indentation(line);
+            String trimmed = line.trim();
+            if (trimmed.equals(fieldName + ":")) {
+                inside = true;
+                parentIndent = indent;
+                continue;
+            }
+            if (inside && !trimmed.isBlank() && indent <= parentIndent) {
+                break;
+            }
+            if (inside && indent == parentIndent + 2 && trimmed.startsWith("- ")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private int indentation(String line) {
+        int count = 0;
+        while (count < line.length() && line.charAt(count) == ' ') {
+            count++;
+        }
+        return count;
     }
 
     private AgentResult successResult(AgentState state) {

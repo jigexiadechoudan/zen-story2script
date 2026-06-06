@@ -22,7 +22,10 @@ class AgentNovelToScreenplayServiceTests {
         NovelToScreenplayAgent agent = mock(NovelToScreenplayAgent.class);
         when(agent.convert(any(AgentContext.class))).thenReturn(new AgentResult(
                 "schema_version: \"1.0\"",
-                AgentResult.QualityReport.success(List.of("chapter_parse", "yaml_validation"), List.of()),
+                AgentResult.QualityReport.success(
+                        List.of("chapter_parse", "yaml_validation", "chapterCount=3", "sceneCount=3"),
+                        List.of()
+                ),
                 new AgentResult.AgentTrace(
                         "react",
                         List.of(new AgentResult.Step(1, "yaml_validation", "YAML validation passed.")),
@@ -43,7 +46,8 @@ class AgentNovelToScreenplayServiceTests {
         assertThat(response.schemaVersion()).isEqualTo(ScreenplayYamlSchema.VERSION);
         assertThat(response.warnings()).containsExactly("sample_warning");
         assertThat(response.qualityReport().confidence()).isEqualTo(1.0);
-        assertThat(response.qualityReport().checks()).containsExactly("chapter_parse", "yaml_validation");
+        assertThat(response.qualityReport().checks())
+                .containsExactly("chapter_parse", "yaml_validation", "chapterCount=3", "sceneCount=3");
         assertThat(response.agentTrace().mode()).isEqualTo("react");
         assertThat(response.agentTrace().steps()).containsExactly("1. yaml_validation: YAML validation passed.");
     }

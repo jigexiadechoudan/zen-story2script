@@ -64,6 +64,10 @@ final class AgentState {
         return toolCalls;
     }
 
+    int agentStepCount() {
+        return traceSteps.size();
+    }
+
     boolean chaptersParsed() {
         return chapterParseOutput != null;
     }
@@ -131,6 +135,10 @@ final class AgentState {
 
     void warn(String warning) {
         warnings.add(warning);
+    }
+
+    void addCheck(String check) {
+        checks.add(check);
     }
 
     void recordToolCall(String tool, String summary) {

@@ -1,6 +1,7 @@
 package dev.zen.story2script.agent;
 
 import dev.zen.story2script.schema.YamlSchemaValidator;
+import dev.zen.story2script.config.DevFallbackToolLlmClientConfiguration;
 import dev.zen.story2script.tools.ChapterParseTool;
 import dev.zen.story2script.tools.ScenePlanningTool;
 import dev.zen.story2script.tools.ScreenplayYamlWriteTool;
@@ -146,6 +147,60 @@ class NovelToScreenplayAgentTests {
                 );
         assertThat(result.warnings()).contains("YAML was repaired after initial validation failure.");
         assertThat(llmClient.calls()).hasSize(4);
+    }
+
+    @Test
+    void devFallbackReturnsNonEmptySchemaValidYamlWithClearWarningsAndTrace() {
+        ToolLlmClient llmClient = new DevFallbackToolLlmClientConfiguration.DevFallbackToolLlmClient();
+        NovelToScreenplayAgent agent = new NovelToScreenplayAgent(
+                new ChapterParseTool(),
+                new StoryAnalysisTool(llmClient),
+                new ScenePlanningTool(llmClient),
+                new ScreenplayYamlWriteTool(llmClient),
+                new YamlSchemaValidator(),
+                new YamlRepairTool(llmClient),
+                new RuleBasedAgentPlanner(),
+                NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS,
+                llmClient.devFallback()
+        );
+
+        AgentResult result = agent.convert(AgentContext.of(
+                "Fog Town Letter",
+                sourceText(),
+                "short_drama",
+                "restrained"
+        ));
+
+        assertThat(result.qualityReport().success()).isTrue();
+        assertThat(result.yaml()).isNotBlank();
+        assertThat(new YamlSchemaValidator().validate(result.yaml()).valid()).isTrue();
+        assertThat(result.yaml())
+                .contains("schema_version")
+                .contains("work:")
+                .contains("adaptation:")
+                .contains("characters:")
+                .contains("plot_outline:")
+                .contains("scenes:")
+                .contains("notes:")
+                .contains("Fog Town Letter")
+                .contains("short_drama")
+                .contains("restrained");
+        assertThat(result.warnings())
+                .contains("当前使用 dev fallback 演示输出。")
+                .contains("未调用真实大模型。")
+                .contains("配置 application-local.yml 后可启用真实模型。");
+        assertThat(result.agentTrace().steps())
+                .extracting(AgentResult.Step::summary)
+                .anyMatch(summary -> summary.contains("已进入 dev fallback"))
+                .anyMatch(summary -> summary.contains("已解析章节"))
+                .anyMatch(summary -> summary.contains("已生成示例 YAML"))
+                .anyMatch(summary -> summary.contains("未调用真实大模型"));
+        assertThat(result.qualityReport().checks())
+                .contains("chapterCount=3")
+                .contains("characterCount=2")
+                .contains("sceneCount=3")
+                .contains("reactSteps=7")
+                .contains("repaired=false");
     }
 
     @Test

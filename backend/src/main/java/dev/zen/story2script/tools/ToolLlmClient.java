@@ -12,4 +12,11 @@ public interface ToolLlmClient {
      * 执行一次模型生成：systemPrompt 放规则，userPrompt 放本次任务输入。
      */
     String generate(String systemPrompt, String userPrompt);
+
+    /**
+     * Whether this client is the dev-only demonstration fallback instead of a real model adapter.
+     */
+    default boolean devFallback() {
+        return false;
+    }
 }

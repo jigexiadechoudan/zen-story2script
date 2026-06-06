@@ -1,6 +1,8 @@
 package dev.zen.story2script.tools;
 
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
@@ -10,7 +12,8 @@ import org.springframework.stereotype.Component;
  * 会抛出明确错误，提示需要先配置模型。</p>
  */
 @Component
-@ConditionalOnMissingBean(ToolLlmClient.class)
+@Profile("!dev")
+@ConditionalOnMissingBean(ChatModel.class)
 class UnavailableToolLlmClient implements ToolLlmClient {
 
     @Override
