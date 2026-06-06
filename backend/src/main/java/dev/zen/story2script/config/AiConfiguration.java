@@ -1,13 +1,16 @@
 package dev.zen.story2script.config;
 
+import dev.zen.story2script.tools.SpringAiToolLlmClient;
+import dev.zen.story2script.tools.ToolLlmClient;
+import dev.zen.story2script.tools.UnavailableToolLlmClient;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 
 /**
  * Spring AI chat-client wiring.
@@ -28,11 +31,21 @@ public class AiConfiguration {
     @Bean
     @ConditionalOnBean(ChatModel.class)
     @ConditionalOnMissingBean(ChatClient.class)
-    ChatClient chatClient(
-            ChatClient.Builder chatClientBuilder,
-            ObjectProvider<ToolCallbackProvider> toolCallbackProviders) {
-        return chatClientBuilder
-                .defaultToolCallbacks(toolCallbackProviders.orderedStream().toArray(ToolCallbackProvider[]::new))
-                .build();
+    ChatClient chatClient(ChatClient.Builder chatClientBuilder) {
+        return chatClientBuilder.build();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(ToolLlmClient.class)
+    @Profile("!dev")
+    ToolLlmClient toolLlmClient(
+            ObjectProvider<ChatModel> chatModelProvider,
+            ObjectProvider<ChatClient.Builder> chatClientBuilderProvider) {
+        ChatModel chatModel = chatModelProvider.getIfAvailable();
+        ChatClient.Builder chatClientBuilder = chatClientBuilderProvider.getIfAvailable();
+        if (chatModel != null && chatClientBuilder != null) {
+            return new SpringAiToolLlmClient(chatClientBuilder);
+        }
+        return new UnavailableToolLlmClient();
     }
 }

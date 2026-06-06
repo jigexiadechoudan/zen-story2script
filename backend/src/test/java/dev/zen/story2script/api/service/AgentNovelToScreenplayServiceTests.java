@@ -13,6 +13,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AgentNovelToScreenplayServiceTests {
@@ -39,7 +40,8 @@ class AgentNovelToScreenplayServiceTests {
                 "Fog Town Letter",
                 "Chapter 1\nA\nChapter 2\nB\nChapter 3\nC",
                 "short_drama",
-                "restrained"
+                "restrained",
+                "react"
         ));
 
         assertThat(response.yaml()).isEqualTo("schema_version: \"1.0\"");
@@ -50,5 +52,27 @@ class AgentNovelToScreenplayServiceTests {
                 .containsExactly("chapter_parse", "yaml_validation", "chapterCount=3", "sceneCount=3");
         assertThat(response.agentTrace().mode()).isEqualTo("react");
         assertThat(response.agentTrace().steps()).containsExactly("1. yaml_validation: YAML validation passed.");
+    }
+
+    @Test
+    void defaultsApiRequestsToFastConversionMode() {
+        NovelToScreenplayAgent agent = mock(NovelToScreenplayAgent.class);
+        when(agent.convert(any(AgentContext.class))).thenReturn(new AgentResult(
+                "schema_version: \"1.0\"",
+                AgentResult.QualityReport.success(List.of("fast_mode"), List.of()),
+                new AgentResult.AgentTrace("react", List.of(), 0),
+                List.of()
+        ));
+        AgentNovelToScreenplayService service = new AgentNovelToScreenplayService(agent);
+
+        service.convert(new ConvertRequest(
+                "Fog Town Letter",
+                "Chapter 1\nA\nChapter 2\nB\nChapter 3\nC",
+                "short_drama",
+                "restrained",
+                null
+        ));
+
+        verify(agent).convert(org.mockito.ArgumentMatchers.argThat(AgentContext::fastMode));
     }
 }

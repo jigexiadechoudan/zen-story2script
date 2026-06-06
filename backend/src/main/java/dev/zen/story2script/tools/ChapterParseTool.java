@@ -21,7 +21,7 @@ public class ChapterParseTool {
     private static final int MIN_CHAPTER_COUNT = 3;
 
     private static final Pattern CHAPTER_HEADING = Pattern.compile(
-            "^(\\s*(?:(?:\\x{7b2c}\\s*(?:[0-9\\uff10-\\uff19]+|[\\x{96f6}\\x{3007}\\x{4e00}\\x{4e8c}\\x{4e09}\\x{56db}\\x{4e94}\\x{516d}\\x{4e03}\\x{516b}\\x{4e5d}\\x{5341}\\x{767e}\\x{5343}\\x{4e07}\\x{4e24}]+)\\s*\\x{7ae0})|(?:Chapter\\s+[0-9]+\\b))[^\\r\\n]*)",
+            "^(\\s*(?:#{1,6}\\s*)?(?:(?:\\x{7b2c}\\s*(?:[0-9\\uff10-\\uff19]+|[\\x{96f6}\\x{3007}\\x{4e00}\\x{4e8c}\\x{4e09}\\x{56db}\\x{4e94}\\x{516d}\\x{4e03}\\x{516b}\\x{4e5d}\\x{5341}\\x{767e}\\x{5343}\\x{4e07}\\x{4e24}]+)\\s*\\x{7ae0})|(?:Chapter\\s+[0-9]+\\b))[^\\r\\n]*)",
             Pattern.CASE_INSENSITIVE | Pattern.MULTILINE
     );
 
@@ -41,7 +41,7 @@ public class ChapterParseTool {
         if (chapters.size() < MIN_CHAPTER_COUNT) {
             return new ChapterParseOutput(
                     false,
-                    "ChapterParseTool requires at least 3 chapters, but found %d. Supported headings: \u7b2c1\u7ae0, \u7b2c\u4e00\u7ae0, Chapter 1."
+                    "ChapterParseTool requires at least 3 chapters, but found %d. Supported headings: \u7b2c1\u7ae0, \u7b2c\u4e00\u7ae0, # \u7b2c\u4e00\u7ae0, ## \u7b2c\u4e00\u7ae0, Chapter 1."
                             .formatted(chapters.size()),
                     chapters
             );
@@ -54,9 +54,13 @@ public class ChapterParseTool {
         Matcher matcher = CHAPTER_HEADING.matcher(sourceText);
         List<HeadingMatch> headings = new ArrayList<>();
         while (matcher.find()) {
-            headings.add(new HeadingMatch(matcher.group(1).trim(), matcher.start(1), matcher.end(1)));
+            headings.add(new HeadingMatch(normalizeHeading(matcher.group(1)), matcher.start(1), matcher.end(1)));
         }
         return headings;
+    }
+
+    private String normalizeHeading(String rawHeading) {
+        return rawHeading == null ? "" : rawHeading.trim().replaceFirst("^#{1,6}\\s*", "").trim();
     }
 
     private List<ParsedChapter> splitChapters(String sourceText, List<HeadingMatch> headings) {

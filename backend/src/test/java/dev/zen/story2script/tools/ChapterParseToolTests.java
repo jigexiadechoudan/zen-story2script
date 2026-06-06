@@ -52,4 +52,28 @@ class ChapterParseToolTests {
                 .contains("Chapter 1");
         assertThat(output.chapters()).hasSize(2);
     }
+
+    @Test
+    void parsesMarkdownChineseChapterHeadings() {
+        String sourceText = """
+                # \u7b2c\u4e00\u7ae0 \u5f52\u6765
+                \u6797\u590f\u56de\u5230\u96fe\u9547\u3002
+                ## \u7b2c\u4e8c\u7ae0 \u65e7\u4fe1
+                \u5979\u53d1\u73b0\u533f\u540d\u4fe1\u3002
+                ### \u7b2c\u4e09\u7ae0 \u8f66\u7ad9
+                \u9648\u9ed8\u51fa\u73b0\u5728\u7ad9\u53f0\u3002
+                """;
+
+        ChapterParseTool.ChapterParseOutput output = tool.parse(new ChapterParseTool.ChapterParseInput(sourceText));
+
+        assertThat(output.valid()).isTrue();
+        assertThat(output.chapters())
+                .extracting(ChapterParseTool.ParsedChapter::heading)
+                .containsExactly(
+                        "\u7b2c\u4e00\u7ae0 \u5f52\u6765",
+                        "\u7b2c\u4e8c\u7ae0 \u65e7\u4fe1",
+                        "\u7b2c\u4e09\u7ae0 \u8f66\u7ad9"
+                );
+        assertThat(output.chapters().get(0).content()).contains("\u6797\u590f\u56de\u5230\u96fe\u9547");
+    }
 }

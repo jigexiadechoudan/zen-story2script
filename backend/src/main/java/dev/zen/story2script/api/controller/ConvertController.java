@@ -4,12 +4,16 @@ import dev.zen.story2script.api.dto.ConvertRequest;
 import dev.zen.story2script.api.dto.ConvertResponse;
 import dev.zen.story2script.api.service.NovelToScreenplayService;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-// 轻量 HTTP 边界：校验请求结构，并把转换工作委托给 API 服务接口。
+import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
+
 @RestController
 @RequestMapping("/api/convert")
 class ConvertController {
@@ -22,7 +26,29 @@ class ConvertController {
 
     @PostMapping
     ConvertResponse convert(@Valid @RequestBody ConvertRequest request) {
-        // Controller 不直接拼装剧本，也不调用 Spring AI；真实实现应隐藏在服务接口后面。
         return service.convert(request);
+    }
+
+    @PostMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    SseEmitter convertStream(@Valid @RequestBody ConvertRequest request) {
+        SseEmitter emitter = new SseEmitter(300_000L);
+        CompletableFuture.runAsync(() -> {
+            try {
+                service.convertStream(request, event -> send(emitter, event.type(), event));
+                emitter.complete();
+            } catch (RuntimeException ex) {
+                send(emitter, "error", ex.getMessage());
+                emitter.completeWithError(ex);
+            }
+        });
+        return emitter;
+    }
+
+    private void send(SseEmitter emitter, String name, Object data) {
+        try {
+            emitter.send(SseEmitter.event().name(name).data(data));
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to send convert stream event.", ex);
+        }
     }
 }

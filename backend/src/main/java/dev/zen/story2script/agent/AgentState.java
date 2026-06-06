@@ -5,6 +5,7 @@ import dev.zen.story2script.tools.ChapterParseTool;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Mutable observations accumulated during one ReAct run.
@@ -156,6 +157,13 @@ final class AgentState {
         }
         AgentResult.Step last = traceSteps.remove(traceSteps.size() - 1);
         traceSteps.add(new AgentResult.Step(last.index(), last.tool(), summary));
+    }
+
+    Optional<AgentResult.Step> lastTraceStep() {
+        if (traceSteps.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(traceSteps.get(traceSteps.size() - 1));
     }
 
     AgentResult.AgentTrace trace() {

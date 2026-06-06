@@ -1,6 +1,7 @@
 const DEFAULT_API_BASE_URL = 'http://localhost:8080'
+const STREAM_TIMEOUT_MS = 420000
 
-const NETWORK_ERROR_MESSAGE = '浏览器未能访问后端，可能是后端未启动或 CORS 未放行。'
+const NETWORK_ERROR_MESSAGE = '浏览器未拿到后端响应：请检查后端是否启动、端口是否为 8080，或 CORS 预检是否已放行。'
 const LOCAL_MOCK_MESSAGE = '本地 mock，仅用于前端演示。'
 const BACKEND_DEV_FALLBACK_MESSAGE = '后端已连通，但当前未配置真实模型，展示 dev fallback 结果。'
 
@@ -10,7 +11,11 @@ const formatLabels = {
   scene_outline: '分场大纲'
 }
 
-export async function convertNovel(payload) {
+export async function convertNovel(payload, onEvent) {
+  if (typeof ReadableStream !== 'undefined') {
+    return convertNovelStream(payload, onEvent)
+  }
+
   try {
     const response = await fetch(`${getApiBaseUrl()}/api/convert`, {
       method: 'POST',
@@ -41,6 +46,106 @@ export async function convertNovel(payload) {
       networkMessage: NETWORK_ERROR_MESSAGE,
       localMockMessage: LOCAL_MOCK_MESSAGE
     })
+  }
+}
+
+export async function convertNovelStream(payload, onEvent) {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/convert/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream'
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    })
+
+    if (!response.ok || !response.body) {
+      const data = await parseJsonResponse(response)
+      throw new ApiError(data?.message || '流式转换启动失败。', data?.code, response.status)
+    }
+
+    return await readEventStream(response.body, payload, onEvent)
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error
+    }
+    if (error.name === 'AbortError') {
+      throw new ApiError('模型转换超时，请缩短文本或稍后重试。', 'STREAM_TIMEOUT', 408)
+    }
+    return normalizeConvertResponse(createMockResponse(payload, error), {
+      source: 'local_mock',
+      networkMessage: NETWORK_ERROR_MESSAGE,
+      localMockMessage: LOCAL_MOCK_MESSAGE
+    })
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+async function readEventStream(body, payload, onEvent) {
+  const reader = body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  let finalResult = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() || ''
+
+    for (const part of parts) {
+      const event = parseSseEvent(part)
+      if (!event) {
+        continue
+      }
+      onEvent?.(event)
+      if (event.payload?.type === 'result' && event.payload.data) {
+        finalResult = normalizeConvertResponse(event.payload.data, {
+          source: 'backend',
+          networkMessage: '',
+          localMockMessage: ''
+        })
+      }
+    }
+  }
+
+  if (!finalResult) {
+    throw new ApiError('流式转换结束但没有返回结果。', 'STREAM_RESULT_MISSING', 502)
+  }
+  return finalResult
+}
+
+function parseSseEvent(raw) {
+  const lines = raw.split(/\r?\n/)
+  const eventName = lines.find((line) => line.startsWith('event:'))?.slice(6).trim() || 'message'
+  const dataLines = lines
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+
+  if (!dataLines.length) {
+    return null
+  }
+
+  const text = dataLines.join('\n')
+  try {
+    return {
+      name: eventName,
+      payload: JSON.parse(text)
+    }
+  } catch {
+    return {
+      name: eventName,
+      payload: { type: eventName, message: text }
+    }
   }
 }
 
@@ -210,7 +315,7 @@ function createMockResponse(payload, error) {
 }
 
 function estimateChapterCount(sourceText) {
-  const matches = sourceText.match(/(^|\n)\s*(第[一二三四五六七八九十百千万\d]+[章节回]|chapter\s+\d+)/gi)
+  const matches = sourceText.match(/(^|\n)\s*(#{1,6}\s*)?(第\s*[一二三四五六七八九十百千万零〇两\d０-９]+\s*[章节回]|chapter\s+\d+)/gi)
   return matches?.length || 0
 }
 

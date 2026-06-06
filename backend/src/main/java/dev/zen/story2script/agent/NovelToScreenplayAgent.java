@@ -127,9 +127,17 @@ public class NovelToScreenplayAgent {
     }
 
     public AgentResult convert(AgentContext context) {
+        return convert(context, AgentProgressListener.NOOP);
+    }
+
+    public AgentResult convert(AgentContext context, AgentProgressListener progressListener) {
         AgentState state = new AgentState(context);
+        AgentProgressListener listener = progressListener == null ? AgentProgressListener.NOOP : progressListener;
         if (devFallback) {
             enterDevFallback(state);
+        }
+        if (context.fastMode()) {
+            return convertFast(state, listener);
         }
 
         try {
@@ -144,12 +152,44 @@ public class NovelToScreenplayAgent {
                 }
 
                 execute(decision, state);
+                state.lastTraceStep().ifPresent(listener::onStep);
             }
         } catch (IllegalArgumentException ex) {
             state.warn(ex.getMessage());
             return failureResult("", "AGENT_INPUT_INVALID", ex.getMessage(), state, List.of());
         } catch (RuntimeException ex) {
             String message = "Agent tool execution failed: " + ex.getMessage();
+            state.warn(message);
+            return failureResult("", "AGENT_TOOL_FAILED", message, state, List.of());
+        }
+    }
+
+    private AgentResult convertFast(AgentState state, AgentProgressListener listener) {
+        try {
+            state.addCheck("fast_mode");
+            parseChapters(state);
+            state.lastTraceStep().ifPresent(listener::onStep);
+            if (state.chapterParseFailed()) {
+                return finish(state);
+            }
+
+            writeFastYaml(state);
+            state.lastTraceStep().ifPresent(listener::onStep);
+
+            validateYaml(state);
+            state.lastTraceStep().ifPresent(listener::onStep);
+            if (!state.yamlValid() && state.canRepairYaml()) {
+                repairYaml(state);
+                state.lastTraceStep().ifPresent(listener::onStep);
+                validateYaml(state);
+                state.lastTraceStep().ifPresent(listener::onStep);
+            }
+            return finish(state);
+        } catch (IllegalArgumentException ex) {
+            state.warn(ex.getMessage());
+            return failureResult("", "AGENT_INPUT_INVALID", ex.getMessage(), state, List.of());
+        } catch (RuntimeException ex) {
+            String message = "Agent fast conversion failed: " + ex.getMessage();
             state.warn(message);
             return failureResult("", "AGENT_TOOL_FAILED", message, state, List.of());
         }
@@ -221,6 +261,25 @@ public class NovelToScreenplayAgent {
         state.observeYamlWrite(output.yaml());
         if (devFallback) {
             state.replaceLastTraceSummary("已生成示例 YAML：使用请求元数据构造 dev fallback 演示输出。");
+        }
+    }
+
+    private void writeFastYaml(AgentState state) {
+        state.recordToolCall(AgentAction.WRITE_YAML.traceName(), "Generated compact screenplay YAML draft in fast mode.");
+        ScreenplayYamlWriteTool.ScreenplayYamlWriteOutput output = screenplayYamlWriteTool.writeFast(
+                new ScreenplayYamlWriteTool.FastScreenplayYamlWriteInput(
+                        state.context().title(),
+                        state.context().originalAuthor(),
+                        state.context().language(),
+                        state.context().targetFormat(),
+                        state.context().targetDuration(),
+                        state.context().styleHint(),
+                        state.chapterParseOutput().chapters()
+                )
+        );
+        state.observeYamlWrite(output.yaml());
+        if (devFallback) {
+            state.replaceLastTraceSummary("已生成快速模式示例 YAML：使用请求元数据构造 dev fallback 演示输出。");
         }
     }
 

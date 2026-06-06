@@ -65,6 +65,40 @@ button {
   margin-bottom: 18px;
 }
 
+.header-tools {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.language-toggle {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(54px, auto));
+  border: 1px solid var(--line);
+  background: rgba(251, 250, 247, 0.72);
+}
+
+.language-toggle button {
+  min-height: 34px;
+  padding: 7px 11px;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.language-toggle button:last-child {
+  border-right: 0;
+}
+
+.language-toggle button.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
 .eyebrow,
 .section-kicker {
   margin: 0 0 6px;
@@ -350,6 +384,15 @@ button:disabled {
   place-items: center;
   color: #8d9894;
   text-align: center;
+}
+
+.yaml-preview.streaming {
+  display: block;
+  place-items: initial;
+  color: #cfe3dc;
+  text-align: left;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 .insight-grid {

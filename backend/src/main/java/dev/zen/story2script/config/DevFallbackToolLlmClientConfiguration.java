@@ -45,7 +45,8 @@ public class DevFallbackToolLlmClientConfiguration {
             if (systemPrompt.contains("scene planning tool")) {
                 return scenePlan(userPrompt);
             }
-            if (systemPrompt.contains("screenplay YAML writing tool")) {
+            if (systemPrompt.contains("screenplay YAML writing tool")
+                    || systemPrompt.contains("fast novel-to-screenplay YAML agent")) {
                 return screenplayYaml(userPrompt);
             }
             if (systemPrompt.contains("YAML repair tool")) {
@@ -103,6 +104,9 @@ public class DevFallbackToolLlmClientConfiguration {
             String targetDuration = value(prompt, TARGET_DURATION, "demo runtime");
             String styleHint = value(prompt, STYLE_HINT, "standard");
             int sceneCount = Math.max(1, countOccurrences(prompt, "\"sceneId\""));
+            if (sceneCount == 1) {
+                sceneCount = Math.max(1, chapters(prompt).size());
+            }
             String chapterRange = sceneCount == 1 ? "Chapter 1" : "Chapter 1-%d".formatted(sceneCount);
 
             StringBuilder plotOutline = new StringBuilder();

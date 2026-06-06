@@ -53,6 +53,62 @@ class NovelToScreenplayAgentTests {
     }
 
     @Test
+    void fastModeSkipsIntermediateLlmCalls() {
+        SequencedLlmClient llmClient = new SequencedLlmClient(List.of(validYaml()));
+        NovelToScreenplayAgent agent = agent(llmClient, NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS);
+
+        AgentResult result = agent.convert(AgentContext.of(
+                "Fog Town Letter",
+                sourceText(),
+                "short_drama",
+                "restrained",
+                "fast"
+        ));
+
+        assertThat(result.qualityReport().success()).isTrue();
+        assertThat(result.qualityReport().checks()).containsExactly(
+                "fast_mode",
+                "chapter_parse",
+                "yaml_write",
+                "yaml_validation"
+        );
+        assertThat(result.agentTrace().toolCalls()).isEqualTo(3);
+        assertThat(result.agentTrace().steps())
+                .extracting(AgentResult.Step::tool)
+                .containsExactly("chapter_parse", "yaml_write", "yaml_validation");
+        assertThat(llmClient.calls()).hasSize(1);
+        assertThat(llmClient.calls().getFirst()).contains("Parsed chapters:");
+    }
+
+    @Test
+    void fastModeCanRepairInvalidYamlOnce() {
+        SequencedLlmClient llmClient = new SequencedLlmClient(List.of(
+                "schema_version: \"1.0\"",
+                validYaml()
+        ));
+        NovelToScreenplayAgent agent = agent(llmClient, NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS);
+
+        AgentResult result = agent.convert(AgentContext.of(
+                "Fog Town Letter",
+                sourceText(),
+                "short_drama",
+                null,
+                "fast"
+        ));
+
+        assertThat(result.qualityReport().success()).isTrue();
+        assertThat(result.qualityReport().checks()).containsExactly(
+                "fast_mode",
+                "chapter_parse",
+                "yaml_write",
+                "yaml_validation",
+                "yaml_repair",
+                "yaml_validation_after_repair"
+        );
+        assertThat(llmClient.calls()).hasSize(2);
+    }
+
+    @Test
     void fewerThanThreeChaptersReturnsClearError() {
         SequencedLlmClient llmClient = new SequencedLlmClient(List.of());
         NovelToScreenplayAgent agent = agent(llmClient, NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS);
