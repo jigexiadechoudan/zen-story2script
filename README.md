@@ -6,6 +6,7 @@ Zen Story2Script 是一个“小说文本转结构化剧本 YAML”的 AI Agent 
 
 ## 评审入口
 
+- 线上演示地址：[https://www.zens2s.top/](https://www.zens2s.top/)
 - Demo 视频：[Bilibili - Zen Story2Script 作品演示](https://www.bilibili.com/video/BV1XbEb6DEQX/)
 - 剧本 YAML Schema 文档：[docs/screenplay-yaml-schema.md](docs/screenplay-yaml-schema.md)
 

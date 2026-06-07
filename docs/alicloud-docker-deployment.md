@@ -4,6 +4,8 @@
 
 当前部署文件是开发阶段的基线草稿，目标是先让应用在云服务器上可重复构建、启动和验证。后续正式上线前，域名、HTTPS、镜像仓库、CI/CD、日志采集、监控、备份、RAG/PGVector、数据库网络策略都可以继续调整。
 
+当前线上演示地址：[https://www.zens2s.top/](https://www.zens2s.top/)。
+
 ## 服务器还需要什么
 
 如果 Docker 已经可用，应用运行本身不需要再安装 Java、Maven、Node.js 或 Nginx。镜像构建会在 Docker 容器里完成。
