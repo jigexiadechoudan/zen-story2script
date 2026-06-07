@@ -1,0 +1,14 @@
+.git
+.codex
+.vscode
+**/target
+**/node_modules
+**/dist
+**/build
+**/.vite
+**/*.log
+**/application-local.yml
+**/application-local.yaml
+.env
+.env.*
+!.env.example

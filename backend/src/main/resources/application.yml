@@ -18,6 +18,7 @@ spring:
       chat:
         options:
           model: ${OPENAI_MODEL:gpt-4.1-mini}
+          max-tokens: ${OPENAI_MAX_TOKENS:4096}
     vectorstore:
       type: ${SPRING_AI_VECTORSTORE_TYPE:none}
   datasource:
@@ -37,11 +38,13 @@ server:
 
 story2script:
   agent:
-    max-steps: ${STORY2SCRIPT_AGENT_MAX_STEPS:8}
+    autonomous-enabled: ${STORY2SCRIPT_AGENT_AUTONOMOUS_ENABLED:true}
+    autonomous-timeout: ${STORY2SCRIPT_AGENT_AUTONOMOUS_TIMEOUT:45s}
+    max-input-chars: ${STORY2SCRIPT_AGENT_MAX_INPUT_CHARS:12000}
   rag:
     vector-store-enabled: ${STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED:false}
     sync-on-startup: ${STORY2SCRIPT_RAG_SYNC_ON_STARTUP:false}
-    top-k: ${STORY2SCRIPT_RAG_TOP_K:3}
+    top-k: ${STORY2SCRIPT_RAG_TOP_K:2}
     similarity-threshold: ${STORY2SCRIPT_RAG_SIMILARITY_THRESHOLD:0.0}
   yaml:
     schema-version: "1.0"

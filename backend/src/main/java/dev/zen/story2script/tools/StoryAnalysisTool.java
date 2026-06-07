@@ -46,6 +46,7 @@ public class StoryAnalysisTool {
                   "events": [{"sourceChapter": "", "summary": "", "consequence": ""}],
                   "conflicts": [{"parties": [""], "conflict": "", "stakes": ""}]
                 }
+                Write all natural-language values in the requested output language.
                 Do not return Markdown code fences, commentary, or any text outside the JSON object.
                 """;
     }
@@ -54,10 +55,16 @@ public class StoryAnalysisTool {
         // 保留章节边界，方便后续分场计划追溯每个事件来自哪一章。
         return """
                 Title: %s
+                Output language: %s
                 Style hint: %s
                 Chapters:
                 %s
-                """.formatted(input.title(), ToolInputs.nullToEmpty(input.styleHint()), formatChapters(input.chapters()));
+                """.formatted(
+                input.title(),
+                ToolInputs.nullToEmpty(input.language()),
+                ToolInputs.nullToEmpty(input.styleHint()),
+                formatChapters(input.chapters())
+        );
     }
 
     private String formatChapters(List<ChapterParseTool.ParsedChapter> chapters) {
@@ -73,8 +80,13 @@ public class StoryAnalysisTool {
     public record StoryAnalysisInput(
             String title,
             List<ChapterParseTool.ParsedChapter> chapters,
-            String styleHint
+            String styleHint,
+            String language
     ) {
+        public StoryAnalysisInput(String title, List<ChapterParseTool.ParsedChapter> chapters, String styleHint) {
+            this(title, chapters, styleHint, "zh-CN");
+        }
+
         /**
          * 防御性拷贝，避免工具执行期间调用方继续修改章节列表。
          */

@@ -3,16 +3,22 @@ package dev.zen.story2script.agent;
 import dev.zen.story2script.schema.YamlSchemaValidationResult;
 import dev.zen.story2script.schema.YamlSchemaValidator;
 import dev.zen.story2script.tools.ChapterParseTool;
-import dev.zen.story2script.tools.ScenePlanningTool;
 import dev.zen.story2script.tools.ScreenplayYamlWriteTool;
-import dev.zen.story2script.tools.StoryAnalysisTool;
 import dev.zen.story2script.tools.ToolLlmClient;
 import dev.zen.story2script.tools.YamlRepairTool;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.api.Advisor;
+import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * ReAct loop for converting a novel excerpt into screenplay YAML.
@@ -20,110 +26,98 @@ import java.util.List;
 @Service
 public class NovelToScreenplayAgent {
 
-    public static final int DEFAULT_MAX_TOOL_CALLS = 8;
-    public static final String AGENT_STEP_LIMIT_EXCEEDED = "AGENT_STEP_LIMIT_EXCEEDED";
-
     private final ChapterParseTool chapterParseTool;
-    private final StoryAnalysisTool storyAnalysisTool;
-    private final ScenePlanningTool scenePlanningTool;
     private final ScreenplayYamlWriteTool screenplayYamlWriteTool;
     private final YamlSchemaValidator yamlSchemaValidator;
     private final YamlRepairTool yamlRepairTool;
-    private final AgentPlanner planner;
-    private final int maxToolCalls;
     private final boolean devFallback;
+    private final ChatClient chatClient;
+    private final ToolCallbackProvider toolCallbackProvider;
+    private final List<Advisor> retrievalAdvisors;
+    private final boolean autonomousEnabled;
+    private final Duration autonomousTimeout;
+    private final int maxInputChars;
 
     @Autowired
     public NovelToScreenplayAgent(
             ChapterParseTool chapterParseTool,
-            StoryAnalysisTool storyAnalysisTool,
-            ScenePlanningTool scenePlanningTool,
             ScreenplayYamlWriteTool screenplayYamlWriteTool,
             YamlRepairTool yamlRepairTool,
             ToolLlmClient toolLlmClient,
-            @Value("${story2script.agent.max-steps:8}") int maxToolCalls
+            ObjectProvider<ChatClient> chatClientProvider,
+            ObjectProvider<ToolCallbackProvider> toolCallbackProvider,
+            ObjectProvider<Advisor> advisors,
+            @Value("${story2script.agent.autonomous-enabled:true}") boolean autonomousEnabled,
+            @Value("${story2script.agent.autonomous-timeout:45s}") Duration autonomousTimeout,
+            @Value("${story2script.agent.max-input-chars:12000}") int maxInputChars
     ) {
         this(
                 chapterParseTool,
-                storyAnalysisTool,
-                scenePlanningTool,
                 screenplayYamlWriteTool,
                 new YamlSchemaValidator(),
                 yamlRepairTool,
-                new RuleBasedAgentPlanner(),
-                maxToolCalls,
-                toolLlmClient.devFallback()
+                toolLlmClient.devFallback(),
+                chatClientProvider.getIfAvailable(),
+                toolCallbackProvider.getIfAvailable(),
+                advisors.orderedStream().toList(),
+                autonomousEnabled,
+                autonomousTimeout,
+                maxInputChars
         );
     }
 
     NovelToScreenplayAgent(
             ChapterParseTool chapterParseTool,
-            StoryAnalysisTool storyAnalysisTool,
-            ScenePlanningTool scenePlanningTool,
             ScreenplayYamlWriteTool screenplayYamlWriteTool,
             YamlSchemaValidator yamlSchemaValidator,
             YamlRepairTool yamlRepairTool,
-            int maxToolCalls
-    ) {
-        this(
-                chapterParseTool,
-                storyAnalysisTool,
-                scenePlanningTool,
-                screenplayYamlWriteTool,
-                yamlSchemaValidator,
-                yamlRepairTool,
-                new RuleBasedAgentPlanner(),
-                maxToolCalls,
-                false
-        );
-    }
-
-    NovelToScreenplayAgent(
-            ChapterParseTool chapterParseTool,
-            StoryAnalysisTool storyAnalysisTool,
-            ScenePlanningTool scenePlanningTool,
-            ScreenplayYamlWriteTool screenplayYamlWriteTool,
-            YamlSchemaValidator yamlSchemaValidator,
-            YamlRepairTool yamlRepairTool,
-            AgentPlanner planner,
-            int maxToolCalls
-    ) {
-        this(
-                chapterParseTool,
-                storyAnalysisTool,
-                scenePlanningTool,
-                screenplayYamlWriteTool,
-                yamlSchemaValidator,
-                yamlRepairTool,
-                planner,
-                maxToolCalls,
-                false
-        );
-    }
-
-    NovelToScreenplayAgent(
-            ChapterParseTool chapterParseTool,
-            StoryAnalysisTool storyAnalysisTool,
-            ScenePlanningTool scenePlanningTool,
-            ScreenplayYamlWriteTool screenplayYamlWriteTool,
-            YamlSchemaValidator yamlSchemaValidator,
-            YamlRepairTool yamlRepairTool,
-            AgentPlanner planner,
-            int maxToolCalls,
             boolean devFallback
     ) {
-        if (maxToolCalls < 1) {
-            throw new IllegalArgumentException("maxToolCalls must be positive");
+        this(
+                chapterParseTool,
+                screenplayYamlWriteTool,
+                yamlSchemaValidator,
+                yamlRepairTool,
+                devFallback,
+                null,
+                null,
+                List.of(),
+                false,
+                Duration.ofSeconds(45),
+                12_000
+        );
+    }
+
+    NovelToScreenplayAgent(
+            ChapterParseTool chapterParseTool,
+            ScreenplayYamlWriteTool screenplayYamlWriteTool,
+            YamlSchemaValidator yamlSchemaValidator,
+            YamlRepairTool yamlRepairTool,
+            boolean devFallback,
+            ChatClient chatClient,
+            ToolCallbackProvider toolCallbackProvider,
+            List<Advisor> retrievalAdvisors,
+            boolean autonomousEnabled,
+            Duration autonomousTimeout,
+            int maxInputChars
+    ) {
+        if (autonomousTimeout == null || autonomousTimeout.isNegative() || autonomousTimeout.isZero()) {
+            throw new IllegalArgumentException("autonomousTimeout must be positive");
+        }
+        if (maxInputChars < 1000) {
+            throw new IllegalArgumentException("maxInputChars must be at least 1000");
         }
         this.chapterParseTool = chapterParseTool;
-        this.storyAnalysisTool = storyAnalysisTool;
-        this.scenePlanningTool = scenePlanningTool;
         this.screenplayYamlWriteTool = screenplayYamlWriteTool;
         this.yamlSchemaValidator = yamlSchemaValidator;
         this.yamlRepairTool = yamlRepairTool;
-        this.planner = planner;
-        this.maxToolCalls = maxToolCalls;
         this.devFallback = devFallback;
+        this.chatClient = chatClient;
+        this.toolCallbackProvider = toolCallbackProvider;
+        this.retrievalAdvisors = List.copyOf(retrievalAdvisors == null ? List.of() : retrievalAdvisors);
+        this.autonomousEnabled = autonomousEnabled;
+        this.autonomousTimeout = autonomousTimeout;
+        this.maxInputChars = maxInputChars;
     }
 
     public AgentResult convert(AgentContext context) {
@@ -131,37 +125,194 @@ public class NovelToScreenplayAgent {
     }
 
     public AgentResult convert(AgentContext context, AgentProgressListener progressListener) {
+        if (shouldUseAutonomousReAct(context)) {
+            return convertAutonomouslyWithFallback(context, progressListener);
+        }
+
         AgentState state = new AgentState(context);
         AgentProgressListener listener = progressListener == null ? AgentProgressListener.NOOP : progressListener;
         if (devFallback) {
             enterDevFallback(state);
         }
-        if (context.fastMode()) {
-            return convertFast(state, listener);
+        return convertFast(state, listener);
+    }
+
+    private boolean shouldUseAutonomousReAct(AgentContext context) {
+        return canUseAutonomousReActDependencies()
+                && !context.fastMode();
+    }
+
+    private boolean canUseAutonomousReActDependencies() {
+        return autonomousEnabled
+                && chatClient != null
+                && toolCallbackProvider != null
+                && !devFallback;
+    }
+
+    private AgentResult convertAutonomouslyWithFallback(AgentContext context, AgentProgressListener progressListener) {
+        CompletableFuture<AgentResult> autonomousRun = CompletableFuture.supplyAsync(
+                () -> convertAutonomously(context, progressListener)
+        );
+        try {
+            AgentResult autonomousResult = autonomousRun.get(autonomousTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (autonomousResult.qualityReport().success()) {
+                return autonomousResult;
+            }
+            return convertFastAfterAutonomousFailure(
+                    context,
+                    progressListener,
+                    "AUTONOMOUS_REACT_UNUSABLE",
+                    autonomousResult.qualityReport().message()
+            );
+        } catch (TimeoutException ex) {
+            autonomousRun.cancel(true);
+            return convertFastAfterAutonomousFailure(
+                    context,
+                    progressListener,
+                    "AUTONOMOUS_REACT_TIMEOUT",
+                    "Autonomous ReAct timed out after %s.".formatted(autonomousTimeout)
+            );
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return convertFastAfterAutonomousFailure(
+                    context,
+                    progressListener,
+                    "AUTONOMOUS_REACT_INTERRUPTED",
+                    ex.getMessage()
+            );
+        } catch (java.util.concurrent.ExecutionException ex) {
+            return convertFastAfterAutonomousFailure(
+                    context,
+                    progressListener,
+                    "AUTONOMOUS_REACT_FAILED",
+                    ex.getMessage()
+            );
         }
+    }
+
+    private AgentResult convertFastAfterAutonomousFailure(
+            AgentContext context,
+            AgentProgressListener progressListener,
+            String warning,
+            String reason
+    ) {
+        AgentState fallbackState = new AgentState(context);
+        fallbackState.warn(warning);
+        fallbackState.warn("Autonomous ReAct could not produce a usable result; fell back to fast mode: "
+                + nullToEmpty(reason));
+        fallbackState.recordTrace("autonomous_fallback", warning + "; running fast mode.");
+        AgentResult fastResult = convertFast(fallbackState, progressListener);
+        List<String> warnings = new java.util.ArrayList<>(fastResult.warnings());
+        warnings.add(warning);
+        return new AgentResult(
+                fastResult.yaml(),
+                fastResult.qualityReport(),
+                fastResult.agentTrace(),
+                List.copyOf(warnings)
+        );
+    }
+
+    private AgentResult convertAutonomously(AgentContext context, AgentProgressListener progressListener) {
+        AgentProgressListener listener = progressListener == null ? AgentProgressListener.NOOP : progressListener;
+        AgentState state = new AgentState(context);
+        state.addCheck("llm_autonomous_tool_calling");
+        state.addCheck("autonomousTimeout=%s".formatted(autonomousTimeout));
+        state.addCheck("maxInputChars=%d".formatted(maxInputChars));
 
         try {
-            while (true) {
-                AgentDecision decision = planner.decide(state);
-                if (decision.action() == AgentAction.FINISH) {
-                    return finish(state);
-                }
+            state.recordTrace("llm_agent", "Started LLM-driven tool selection.");
+            state.lastTraceStep().ifPresent(listener::onStep);
+            String yaml = chatClient.prompt()
+                    .system(autonomousSystemPrompt())
+                    .user(autonomousUserPrompt(context))
+                    .toolCallbacks(toolCallbackProvider)
+                    .advisors(retrievalAdvisors)
+                    .call()
+                    .content();
 
-                if (!canCallTool(state)) {
-                    return stepLimitResult(state, decision.action());
-                }
+            state.recordToolCall("llm_final_answer", "Received final YAML from LLM autonomous agent.");
+            state.lastTraceStep().ifPresent(listener::onStep);
+            state.observeYamlWrite(yaml == null ? "" : yaml.trim());
 
-                execute(decision, state);
-                state.lastTraceStep().ifPresent(listener::onStep);
+            validateYaml(state);
+            state.lastTraceStep().ifPresent(listener::onStep);
+            if (!state.yamlValid()) {
+                return failureResult(
+                        state.yaml(),
+                        "YAML_VALIDATION_FAILED",
+                        "LLM autonomous agent returned YAML that failed schema validation.",
+                        state,
+                        validationIssues(state.validationResult())
+                );
             }
+            return successResult(state);
         } catch (IllegalArgumentException ex) {
             state.warn(ex.getMessage());
             return failureResult("", "AGENT_INPUT_INVALID", ex.getMessage(), state, List.of());
         } catch (RuntimeException ex) {
-            String message = "Agent tool execution failed: " + ex.getMessage();
+            String message = "LLM autonomous agent execution failed: " + ex.getMessage();
             state.warn(message);
             return failureResult("", "AGENT_TOOL_FAILED", message, state, List.of());
         }
+    }
+
+    private String autonomousSystemPrompt() {
+        return """
+                You are an autonomous ReAct-style novel-to-screenplay agent.
+                You may decide whether and when to call the available tools.
+
+                Available tool responsibilities:
+                - chapter_parse: parse and validate source chapters.
+                - story_analysis: extract characters, events, and conflicts.
+                - scene_planning: turn story analysis into scenes.
+                - yaml_write: write the screenplay YAML draft.
+                - yaml_validation: validate the screenplay YAML against the required schema.
+                - yaml_repair: repair YAML after validation errors if needed.
+
+                Use tools when they help produce a valid screenplay YAML document. Do not expose tool JSON,
+                scratchpad notes, Markdown fences, or commentary in the final answer.
+                The final YAML must be a playable screenplay draft: each scene needs a location, time of day,
+                present characters, concrete action beats, and dialogue beats with speakers.
+                All natural-language YAML values must be written in the requested output language. Keep YAML keys
+                and enum values in the schema language exactly as specified.
+                Do not return only a synopsis, treatment, scene outline, or abstract beat sheet.
+                The final answer must be only YAML matching schema_version "1.0".
+                """;
+    }
+
+    private String autonomousUserPrompt(AgentContext context) {
+        return """
+                Convert this novel excerpt into screenplay YAML.
+
+                Title: %s
+                Author: %s
+                Language: %s
+                Target format: %s
+                Target duration: %s
+                Style hint: %s
+                Input limit: source text is capped at %d characters for autonomous ReAct.
+
+                Source text:
+                %s
+                """.formatted(
+                context.title(),
+                nullToEmpty(context.originalAuthor()),
+                nullToEmpty(context.language()),
+                context.targetFormat(),
+                nullToEmpty(context.targetDuration()),
+                nullToEmpty(context.styleHint()),
+                maxInputChars,
+                limitedSourceText(context.sourceText())
+        );
+    }
+
+    private String limitedSourceText(String sourceText) {
+        if (sourceText.length() <= maxInputChars) {
+            return sourceText;
+        }
+        return sourceText.substring(0, maxInputChars)
+                + "\n\n[TRUNCATED: autonomous ReAct input capped at %d characters. Use fast mode or split chapters for full text.]"
+                .formatted(maxInputChars);
     }
 
     private AgentResult convertFast(AgentState state, AgentProgressListener listener) {
@@ -195,18 +346,6 @@ public class NovelToScreenplayAgent {
         }
     }
 
-    private void execute(AgentDecision decision, AgentState state) {
-        switch (decision.action()) {
-            case PARSE_CHAPTERS -> parseChapters(state);
-            case ANALYZE_STORY -> analyzeStory(state);
-            case PLAN_SCENES -> planScenes(state);
-            case WRITE_YAML -> writeYaml(state);
-            case VALIDATE_YAML -> validateYaml(state);
-            case REPAIR_YAML -> repairYaml(state);
-            case FINISH -> throw new IllegalStateException("FINISH is not executable as a tool.");
-        }
-    }
-
     private void parseChapters(AgentState state) {
         state.recordToolCall(AgentAction.PARSE_CHAPTERS.traceName(), "Parsed source text into chapters.");
         ChapterParseTool.ChapterParseOutput output = chapterParseTool.parse(
@@ -216,51 +355,6 @@ public class NovelToScreenplayAgent {
         state.replaceLastTraceSummary(chapterParseSummary(output));
         if (!output.valid()) {
             state.warn(output.errorMessage());
-        }
-    }
-
-    private void analyzeStory(AgentState state) {
-        state.recordToolCall(AgentAction.ANALYZE_STORY.traceName(), "Analyzed characters, events, and conflicts.");
-        StoryAnalysisTool.StoryAnalysisOutput output = storyAnalysisTool.analyze(
-                new StoryAnalysisTool.StoryAnalysisInput(
-                        state.context().title(),
-                        state.chapterParseOutput().chapters(),
-                        state.context().styleHint()
-                )
-        );
-        state.observeStoryAnalysis(output.analysisJson());
-    }
-
-    private void planScenes(AgentState state) {
-        state.recordToolCall(AgentAction.PLAN_SCENES.traceName(), "Planned screenplay scenes from story analysis.");
-        ScenePlanningTool.ScenePlanningOutput output = scenePlanningTool.plan(
-                new ScenePlanningTool.ScenePlanningInput(
-                        state.context().title(),
-                        state.analysisJson(),
-                        state.context().targetFormat(),
-                        state.context().targetDuration()
-                )
-        );
-        state.observeScenePlan(output.scenePlanJson());
-    }
-
-    private void writeYaml(AgentState state) {
-        state.recordToolCall(AgentAction.WRITE_YAML.traceName(), "Generated screenplay YAML draft.");
-        ScreenplayYamlWriteTool.ScreenplayYamlWriteOutput output = screenplayYamlWriteTool.write(
-                new ScreenplayYamlWriteTool.ScreenplayYamlWriteInput(
-                        state.context().title(),
-                        state.context().originalAuthor(),
-                        state.context().language(),
-                        state.context().targetFormat(),
-                        state.context().targetDuration(),
-                        state.context().styleHint(),
-                        state.analysisJson(),
-                        state.scenePlanJson()
-                )
-        );
-        state.observeYamlWrite(output.yaml());
-        if (devFallback) {
-            state.replaceLastTraceSummary("已生成示例 YAML：使用请求元数据构造 dev fallback 演示输出。");
         }
     }
 
@@ -335,10 +429,6 @@ public class NovelToScreenplayAgent {
         return failureResult("", "AGENT_INCOMPLETE", "Agent stopped before producing valid YAML.", state, List.of());
     }
 
-    private boolean canCallTool(AgentState state) {
-        return state.toolCalls() < maxToolCalls;
-    }
-
     private void enterDevFallback(AgentState state) {
         state.warn("当前使用 dev fallback 演示输出。");
         state.warn("未调用真实大模型。");
@@ -395,6 +485,10 @@ public class NovelToScreenplayAgent {
         return count;
     }
 
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
     private AgentResult successResult(AgentState state) {
         return new AgentResult(
                 state.yaml(),
@@ -402,14 +496,6 @@ public class NovelToScreenplayAgent {
                 state.trace(),
                 state.warnings()
         );
-    }
-
-    private AgentResult stepLimitResult(AgentState state, AgentAction nextAction) {
-        String message = "Agent stopped before %s because the maximum tool call limit of %d was reached."
-                .formatted(nextAction.traceName(), maxToolCalls);
-        state.warn(AGENT_STEP_LIMIT_EXCEEDED);
-        state.recordTrace("step_limit", message);
-        return failureResult("", AGENT_STEP_LIMIT_EXCEEDED, message, state, List.of());
     }
 
     private AgentResult failureResult(

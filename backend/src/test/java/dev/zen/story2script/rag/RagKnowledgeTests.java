@@ -1,7 +1,9 @@
 package dev.zen.story2script.rag;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 
@@ -68,6 +70,20 @@ class RagKnowledgeTests {
                 .contains("screenplay")
                 .contains("Summary:")
                 .contains("Guidance:");
+    }
+
+    @Test
+    void configurationBuildsOfficialRetrievalAugmentationAdvisor() {
+        RagProperties properties = new RagProperties();
+        properties.setTopK(2);
+        properties.setSimilarityThreshold(0.5);
+
+        Advisor advisor = new RagConfiguration().retrievalAugmentationAdvisor(
+                new CapturingVectorStore(List.of()),
+                properties
+        );
+
+        assertThat(advisor).isInstanceOf(RetrievalAugmentationAdvisor.class);
     }
 
     @Test

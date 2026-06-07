@@ -63,17 +63,18 @@ public class InputAssistantService {
     public AssistantChatResponse chat(AssistantChatRequest request) {
         String capability = normalizeCapability(request.capability());
         String homeInput = normalizeText(request.homeInput());
+        String currentStyleHint = normalizeText(request.currentStyleHint());
         List<AssistantChatMessage> messages = normalizeMessages(request.messages());
         List<String> styles = normalizeStyles(request.selectedStyles());
 
         if (chatClient != null) {
-            AssistantChatResponse llmResponse = chatWithLlm(capability, homeInput, messages, styles);
+            AssistantChatResponse llmResponse = chatWithLlm(capability, homeInput, currentStyleHint, messages, styles);
             if (llmResponse != null && !llmResponse.assistantMessage().isBlank()) {
                 return llmResponse;
             }
         }
 
-        return chatWithRules(capability, homeInput, messages, styles);
+        return chatWithRules(capability, homeInput, currentStyleHint, messages, styles);
     }
 
     private ChatClient optionalChatClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider) {
@@ -129,6 +130,7 @@ public class InputAssistantService {
     private AssistantChatResponse chatWithLlm(
             String capability,
             String homeInput,
+            String currentStyleHint,
             List<AssistantChatMessage> messages,
             List<String> styles
     ) {
@@ -148,12 +150,14 @@ public class InputAssistantService {
                             - enhancedInput 必须突出“用户硬约束”和“整理后的素材”，风格只作为可选项。
                             - suggestions 优先提示标题、角色、章节、字数、缺失约束。
                             如果 capability=style：
-                            - assistantMessage 重点给出 1-2 条风格方向建议和原因。
-                            - enhancedInput 必须保留用户素材，同时加入“风格偏好/软建议”段落。
+                            - 你是在和用户直接讨论风格，不要再做正文格式拆分。
+                            - assistantMessage 直接回答用户的问题，重点给出 1-2 条风格方向建议和原因。
+                            - enhancedInput 必须是一段可直接放进首页“风格提示”输入框的文本，长度控制在 80-180 个中文字符。
+                            - enhancedInput 只能包含风格、节奏、情绪、视听感、对白密度、场景调度等软建议；不要包含正文原文、章节拆分、标题、角色清单或待补充结构。
                             - suggestions 优先提示节奏、情绪、视听感、类型标签，不要求用户补齐结构。
                             你必须直接基于当前对话回复，不生成剧本，不触发 RAG、ReAct 或任何工具调用。
                             保持上下文短：assistantMessage 最多 2 句，suggestions 最多 3 条。
-                            始终生成当前 best-effort enhancedInput，供用户确认后回填首页输入区。
+                            始终生成当前 best-effort enhancedInput：format 用于回填首页正文输入区；style 用于回填首页风格提示输入框。
                             不改写用户核心意思；明确区分用户硬约束和风格偏好/软建议。
                             只返回 JSON，不要 Markdown 代码块。
                             JSON 字段：
@@ -170,16 +174,19 @@ public class InputAssistantService {
                             homeInput:
                             %s
 
+                            currentStyleHint:
+                            %s
+
                             selectedStyles:
                             %s
 
                             recentMessages:
                             %s
-                            """.formatted(capability, homeInput, styles, formatMessages(messages)))
+                            """.formatted(capability, homeInput, currentStyleHint, styles, formatMessages(messages)))
                     .call()
                     .content();
 
-            return parseChatResponse(content, capability, homeInput, messages, styles);
+            return parseChatResponse(content, capability, homeInput, currentStyleHint, messages, styles);
         } catch (RuntimeException ex) {
             return null;
         }
@@ -189,6 +196,7 @@ public class InputAssistantService {
             String content,
             String capability,
             String homeInput,
+            String currentStyleHint,
             List<AssistantChatMessage> messages,
             List<String> fallbackStyles
     ) {
@@ -203,9 +211,6 @@ public class InputAssistantService {
             String enhancedInput = String.valueOf(payload.getOrDefault("enhancedInput", "")).trim();
             if (assistantMessage.isBlank()) {
                 return null;
-            }
-            if (enhancedInput.isBlank()) {
-                enhancedInput = chatWithRules(capability, homeInput, messages, fallbackStyles).enhancedInput();
             }
 
             Object rawStyleHints = payload.get("styleHints") == null ? fallbackStyles : payload.get("styleHints");
@@ -226,6 +231,16 @@ public class InputAssistantService {
                     .filter(suggestion -> !suggestion.isBlank())
                     .limit(3)
                     .toList();
+            if (enhancedInput.isBlank()) {
+                enhancedInput = chatWithRules(capability, homeInput, currentStyleHint, messages, fallbackStyles).enhancedInput();
+            }
+            if ("style".equals(capability)) {
+                enhancedInput = buildStyleApplyText(enhancedInput, assistantMessage, styleHints, currentStyleHint, messages);
+                formatHints = withDefaultFormatHints(
+                        Map.of("tone", enhancedInput, "contentType", "小说转脚本"),
+                        styleHints
+                );
+            }
 
             return new AssistantChatResponse(
                     assistantMessage,
@@ -284,15 +299,16 @@ public class InputAssistantService {
     private AssistantChatResponse chatWithRules(
             String capability,
             String homeInput,
+            String currentStyleHint,
             List<AssistantChatMessage> messages,
             List<String> styles
     ) {
         String rawInput = mergedChatInput(homeInput, messages);
         AssistantRefineInputResponse refined = "style".equals(capability)
-                ? refineStyleWithRules(rawInput, styles)
+                ? refineStyleWithRules(rawInput, currentStyleHint, styles)
                 : refineFormatWithRules(rawInput, styles);
         String assistantMessage = "style".equals(capability)
-                ? "我会从类型、情绪和视听感给出轻量风格建议，并把它们作为软偏好写进草稿。"
+                ? "我会基于首页正文给出轻量风格建议，并生成一段可直接回填到风格提示的文本。"
                 : "我会把输入整理成目标、用户硬约束、素材和待补充项，方便直接回填首页。";
         return new AssistantChatResponse(
                 assistantMessage,
@@ -392,20 +408,105 @@ public class InputAssistantService {
         );
     }
 
-    private AssistantRefineInputResponse refineStyleWithRules(String rawInput, List<String> styles) {
+    private AssistantRefineInputResponse refineStyleWithRules(String rawInput, String currentStyleHint, List<String> styles) {
         List<String> styleHints = styles.isEmpty() ? inferStyleHints(rawInput) : styles;
-        String enhancedInput = String.join("\n\n",
-                "【改编目标】小说转脚本",
-                "【用户硬约束】\n" + rawInput,
-                "【风格偏好/软建议】" + String.join("、", styleHints) + "。请只作为语气、节奏和视听呈现参考，不改变核心人物、事件和结局。",
-                "【风格执行方向】优先保持故事原意；通过节奏、场面调度、对白密度和情绪色彩体现风格。"
-        );
+        String base = String.join("、", styleHints);
+        String previous = currentStyleHint.isBlank() ? "" : "延续已有风格提示：" + currentStyleHint + " ";
+        String enhancedInput = normalizeStyleEnhancedInput(previous
+                + base
+                + "。节奏清晰，情绪推进明确，场景调度有画面感；对白保持可表演、不过度解释。风格仅作为软建议，不改变原文核心人物、事件和结局。");
         return new AssistantRefineInputResponse(
                 enhancedInput,
                 styleHints,
                 Map.of("contentType", "小说转脚本", "tone", String.join("、", styleHints)),
                 buildStyleSuggestions(rawInput, styleHints)
         );
+    }
+
+    private String normalizeStyleEnhancedInput(String value) {
+        String text = normalizeText(value)
+                .replace("【改编目标】小说转脚本", "")
+                .replace("【用户硬约束】", "")
+                .replace("【风格偏好/软建议】", "")
+                .replace("【风格执行方向】", "")
+                .trim();
+        text = text.replaceAll("\\n+", " ").replaceAll("\\s{2,}", " ");
+        if (text.length() > 220) {
+            text = text.substring(0, 220).replaceAll("[，、；：][^，、；：]*$", "");
+        }
+        return text;
+    }
+
+    private String buildStyleApplyText(
+            String enhancedInput,
+            String assistantMessage,
+            List<String> styleHints,
+            String currentStyleHint,
+            List<AssistantChatMessage> messages
+    ) {
+        List<String> parts = new ArrayList<>();
+        if (!currentStyleHint.isBlank()) {
+            parts.add(currentStyleHint);
+        }
+        if (!styleHints.isEmpty()) {
+            parts.add(String.join("、", styleHints));
+        }
+        parts.add(extractStyleOnlyText(enhancedInput));
+        parts.add(extractStyleOnlyText(assistantMessage));
+        messages.stream()
+                .filter(message -> "user".equals(message.role()))
+                .map(AssistantChatMessage::text)
+                .map(this::extractStyleOnlyText)
+                .filter(text -> !text.isBlank())
+                .forEach(parts::add);
+
+        String joined = String.join("。", parts.stream()
+                .map(this::normalizeInline)
+                .filter(text -> !text.isBlank())
+                .distinct()
+                .toList());
+        String normalized = normalizeStyleEnhancedInput(joined)
+                .replaceAll("首页已有输入[:：].*", "")
+                .replaceAll("用户最近补充[:：].*", "")
+                .replaceAll("【[^】]+】", "")
+                .trim();
+        if (normalized.isBlank()) {
+            normalized = "电影感，节奏清晰，情绪推进明确；对白保持可表演，风格仅作为软建议，不改变原文核心人物、事件和结局。";
+        }
+        if (!normalized.contains("软建议")) {
+            normalized = normalized + " 风格仅作为软建议，不改变原文核心人物、事件和结局。";
+        }
+        return normalizeStyleEnhancedInput(normalized);
+    }
+
+    private String extractStyleOnlyText(String value) {
+        String text = normalizeStyleEnhancedInput(value)
+                .replaceAll("(?s)首页已有输入[:：].*", "")
+                .replaceAll("(?s)用户硬约束[:：].*", "")
+                .replaceAll("(?s)正文[:：].*", "")
+                .replaceAll("(?s)故事素材[:：].*", "")
+                .replaceAll("(?s)角色清单[:：].*", "")
+                .replaceAll("(?s)章节.*", "")
+                .trim();
+        List<String> sentences = new ArrayList<>();
+        for (String sentence : text.split("[。！？!?\\n]+")) {
+            String normalized = normalizeInline(sentence);
+            if (normalized.isBlank()) {
+                continue;
+            }
+            if (looksLikeStyleSentence(normalized)) {
+                sentences.add(normalized);
+            }
+        }
+        return String.join("。", sentences);
+    }
+
+    private boolean looksLikeStyleSentence(String value) {
+        return containsAny(value,
+                "风格", "基调", "氛围", "节奏", "情绪", "视听", "画面", "镜头", "场景调度",
+                "对白", "叙事", "悬疑", "治愈", "电影感", "短剧感", "轻喜剧", "赛博朋克",
+                "温柔", "温暖", "冷峻", "压抑", "轻松", "年代感", "抒情", "回望", "不悬疑",
+                "真实", "细腻", "克制", "紧凑", "舒缓", "烟火气", "日常感");
     }
 
     private List<String> buildFormatSuggestions(String rawInput) {

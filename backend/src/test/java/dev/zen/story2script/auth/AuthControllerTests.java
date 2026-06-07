@@ -1,6 +1,8 @@
 package dev.zen.story2script.auth;
 
 import dev.zen.story2script.api.service.NovelToScreenplayService;
+import dev.zen.story2script.api.dto.ConvertResponse;
+import dev.zen.story2script.api.dto.ConvertStreamEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,9 +13,15 @@ import org.springframework.mock.web.MockCookie;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+
+import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
@@ -132,20 +140,65 @@ class AuthControllerTests {
     }
 
     @Test
-    void convertRequiresAuthentication() throws Exception {
+    void convertDoesNotRequireAuthentication() throws Exception {
+        when(novelToScreenplayService.convert(any())).thenReturn(new ConvertResponse(
+                "schema_version: \"1.0\"",
+                "1.0",
+                List.of(),
+                new ConvertResponse.QualityReport(1.0, List.of("fast_mode")),
+                new ConvertResponse.AgentTrace("fast", List.of())
+        ));
+
         mockMvc.perform(post("/api/convert")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "title": "Test",
-                                  "sourceText": "Chapter 1\\nText",
+                                  "sourceText": "Chapter 1\\nA\\nChapter 2\\nB\\nChapter 3\\nC",
                                   "targetFormat": "short_drama"
                                 }
                                 """))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("unauthorized"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.schemaVersion").value("1.0"));
 
-        verifyNoInteractions(novelToScreenplayService);
+        verify(novelToScreenplayService).convert(any());
+    }
+
+    @Test
+    void convertStreamDoesNotRequireAuthentication() throws Exception {
+        ConvertResponse response = new ConvertResponse(
+                "schema_version: \"1.0\"",
+                "1.0",
+                List.of(),
+                new ConvertResponse.QualityReport(1.0, List.of("fast_mode")),
+                new ConvertResponse.AgentTrace("fast", List.of())
+        );
+        doAnswer(invocation -> {
+            java.util.function.Consumer<ConvertStreamEvent> consumer = invocation.getArgument(1);
+            consumer.accept(ConvertStreamEvent.status("conversion_started"));
+            consumer.accept(ConvertStreamEvent.result(response));
+            return null;
+        }).when(novelToScreenplayService).convertStream(any(), any());
+
+        MvcResult result = mockMvc.perform(post("/api/convert/stream")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .content("""
+                                {
+                                  "title": "Test",
+                                  "sourceText": "Chapter 1\\nA\\nChapter 2\\nB\\nChapter 3\\nC",
+                                  "targetFormat": "short_drama",
+                                  "conversionMode": "fast"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", containsString(MediaType.TEXT_EVENT_STREAM_VALUE)))
+                .andReturn();
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch(result))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .string(containsString("\"type\":\"result\"")));
     }
 
     @Test

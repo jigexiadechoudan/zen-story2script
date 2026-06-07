@@ -1,0 +1,35 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    image: zen-story2script-backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED: ${STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED:-false}
+      STORY2SCRIPT_RAG_SYNC_ON_STARTUP: ${STORY2SCRIPT_RAG_SYNC_ON_STARTUP:-false}
+      SPRING_AI_MODEL_EMBEDDING: ${SPRING_AI_MODEL_EMBEDDING:-none}
+      SPRING_AI_VECTORSTORE_TYPE: ${SPRING_AI_VECTORSTORE_TYPE:-none}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      DASHSCOPE_EMBEDDING_MODEL: ${DASHSCOPE_EMBEDDING_MODEL:-text-embedding-v4}
+      DASHSCOPE_EMBEDDING_DIMENSIONS: ${DASHSCOPE_EMBEDDING_DIMENSIONS:-1024}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/}
+    image: zen-story2script-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${HTTP_PORT:-80}:80"

@@ -2,6 +2,7 @@ package dev.zen.story2script.tools;
 
 import dev.zen.story2script.rag.InMemoryRagKnowledgeRetriever;
 import dev.zen.story2script.rag.RagKnowledgeService;
+import dev.zen.story2script.rag.RagProperties;
 import dev.zen.story2script.rag.StaticRagDocumentReader;
 import dev.zen.story2script.schema.YamlSchemaValidationError;
 import org.junit.jupiter.api.Test;
@@ -54,6 +55,7 @@ class LlmToolTests {
                 .asString()
                 .contains("scenes")
                 .contains("sceneId")
+                .contains("performable screenplay scenes")
                 .contains("Do not return Markdown code fences");
         assertThat(llmClient.userPrompts()).singleElement()
                 .asString()
@@ -82,6 +84,8 @@ class LlmToolTests {
                 .asString()
                 .contains("schema_version")
                 .contains("1.0")
+                .contains("screenplay draft for actors and directors")
+                .contains("Dialogue beats must also include speaker")
                 .contains("Do not return Markdown code fences");
         assertThat(llmClient.userPrompts()).singleElement()
                 .asString()
@@ -112,7 +116,19 @@ class LlmToolTests {
     }
 
     @Test
-    void scenePlanningToolInjectsRetrievedRagKnowledge() {
+    void yamlValidationToolReturnsStructuredValidationResult() {
+        YamlValidationTool tool = new YamlValidationTool();
+
+        var output = tool.validate(new YamlValidationTool.YamlValidationInput("schema_version: \"1.0\""));
+
+        assertThat(output.valid()).isFalse();
+        assertThat(output.errors())
+                .extracting(YamlSchemaValidationError::code)
+                .contains("MISSING_TOP_LEVEL_FIELD");
+    }
+
+    @Test
+    void scenePlanningToolInjectsTargetSpecificRagKnowledge() {
         ScenePlanningTool tool = new ScenePlanningTool(llmClient, ragKnowledgeService());
 
         tool.plan(new ScenePlanningTool.ScenePlanningInput(
@@ -124,13 +140,16 @@ class LlmToolTests {
 
         assertThat(llmClient.userPrompts()).singleElement()
                 .asString()
+                .contains("short_drama")
                 .contains("RAG knowledge:")
                 .contains("Retrieved adaptation knowledge")
-                .contains("short_drama");
+                .contains("short_drama.")
+                .doesNotContain("screenplay.")
+                .doesNotContain("scene_outline.");
     }
 
     @Test
-    void screenplayYamlWriteToolInjectsRetrievedRagKnowledge() {
+    void screenplayYamlWriteToolInjectsTargetSpecificRagKnowledge() {
         ScreenplayYamlWriteTool tool = new ScreenplayYamlWriteTool(llmClient, ragKnowledgeService());
 
         tool.writeFast(new ScreenplayYamlWriteTool.FastScreenplayYamlWriteInput(
@@ -145,13 +164,45 @@ class LlmToolTests {
 
         assertThat(llmClient.userPrompts()).singleElement()
                 .asString()
+                .contains("screenplay")
                 .contains("RAG knowledge:")
                 .contains("Retrieved adaptation knowledge")
-                .contains("screenplay");
+                .contains("screenplay.")
+                .doesNotContain("short_drama.")
+                .doesNotContain("scene_outline.");
+    }
+
+    @Test
+    void sceneOutlineTargetUsesSceneOutlineRagKnowledge() {
+        ScreenplayYamlWriteTool tool = new ScreenplayYamlWriteTool(llmClient, ragKnowledgeService());
+
+        tool.writeFast(new ScreenplayYamlWriteTool.FastScreenplayYamlWriteInput(
+                "闆鹃晣鏉ヤ俊",
+                "",
+                "zh-CN",
+                "scene_outline",
+                "10min",
+                "鍏嬪埗",
+                List.of(new ChapterParseTool.ParsedChapter(1, "Chapter 1", "A reporter returns."))
+        ));
+
+        assertThat(llmClient.userPrompts()).singleElement()
+                .asString()
+                .contains("scene_outline")
+                .contains("RAG knowledge:")
+                .contains("Retrieved adaptation knowledge")
+                .contains("scene_outline.")
+                .doesNotContain("short_drama.")
+                .doesNotContain("screenplay.");
     }
 
     private RagKnowledgeService ragKnowledgeService() {
-        return new RagKnowledgeService(new InMemoryRagKnowledgeRetriever(new StaticRagDocumentReader()));
+        RagProperties properties = new RagProperties();
+        properties.setTopK(2);
+        return new RagKnowledgeService(
+                new InMemoryRagKnowledgeRetriever(new StaticRagDocumentReader()),
+                properties
+        );
     }
 
     private static class CapturingLlmClient implements ToolLlmClient {

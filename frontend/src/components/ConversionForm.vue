@@ -67,10 +67,20 @@ const emit = defineEmits(['submit'])
       <input v-model="form.title" type="text" :placeholder="text.titlePlaceholder" autocomplete="off" />
     </label>
 
-    <label class="field grow manuscript-field">
-      <span>{{ text.sourceLabel }}</span>
-      <textarea v-model="form.sourceText" :placeholder="text.sourcePlaceholder" />
-    </label>
+    <div class="field grow manuscript-field">
+      <label class="field-label" for="source-textarea">{{ text.sourceLabel }}</label>
+      <div class="manuscript-guide" :class="{ ready: minChaptersMet }">
+        <p>{{ text.sourceFormatIntro }}</p>
+        <ul>
+          <li v-for="format in text.sourceSupportedFormats" :key="format">{{ format }}</li>
+        </ul>
+        <details class="chapter-template">
+          <summary>{{ text.sourceExampleTitle }}</summary>
+          <pre>{{ text.sourceExample }}</pre>
+        </details>
+      </div>
+      <textarea id="source-textarea" v-model="form.sourceText" :placeholder="text.sourcePlaceholder" />
+    </div>
 
     <div class="input-stats" :class="{ ready: minChaptersMet }">
       <span>{{ sourceLength }} {{ text.chars }}</span>

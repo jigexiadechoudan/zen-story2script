@@ -65,12 +65,16 @@ export async function chatWithInputAssistant(payload) {
       }
     }
 
-    return {
+    const result = {
       ...normalizeInputAssistantResponse(data),
       assistantMessage: String(data?.assistantMessage || '').trim() || '我已整理当前输入。',
       usedFallback: false,
       fallbackReason: ''
     }
+    if (payload?.capability === 'style') {
+      result.enhancedInput = normalizeStyleApplyText(result.enhancedInput, result.assistantMessage, result.styleHints, payload)
+    }
+    return result
   } catch {
     return {
       ...fallback(),
@@ -414,6 +418,7 @@ function createMockResponse(payload, error) {
       '      - type: "resolution"',
       '        text: "核心误差被保留下来，成为最终证据。"'
     ].join('\n'),
+    yaml: createPlayableMockYaml(payload, chapterCount, title, styleHint),
     schemaVersion: '1.0',
     warnings: [
       LOCAL_MOCK_MESSAGE,
@@ -436,6 +441,87 @@ function createMockResponse(payload, error) {
       'YAML 校验通过'
     ]
   }
+}
+
+function createPlayableMockYaml(payload, chapterCount, title, styleHint) {
+  const safeChapterCount = Math.max(chapterCount, 3)
+  const english = String(payload.language || '').toLowerCase().startsWith('en')
+  const lead = english ? 'Lead' : '主角'
+  const witness = english ? 'Witness' : '证人'
+
+  return [
+    'schema_version: "1.0"',
+    'work:',
+    `  title: "${escapeYamlValue(title)}"`,
+    '  original_author: ""',
+    `  language: "${english ? 'en-US' : 'zh-CN'}"`,
+    '  source_chapters:',
+    `    count: ${safeChapterCount}`,
+    `    range: "Chapter 1-${safeChapterCount}"`,
+    'adaptation:',
+    `  target_format: "${payload.targetFormat}"`,
+    '  target_duration: "10-15min"',
+    `  genre: "${english ? 'demo' : '演示'}"`,
+    `  tone: "${escapeYamlValue(styleHint)}"`,
+    `  logline: "${english ? 'A local mock scene turns source clues into playable action and dialogue.' : '本地 mock 将原文线索转换为可表演的动作和对白。'}"`,
+    '  principles:',
+    `    - "${english ? 'Prefer performable scene beats over abstract outline notes.' : '优先生成可表演场景节拍，而不是抽象大纲。'}"`,
+    'characters:',
+    '  - id: "char_001"',
+    `    name: "${lead}"`,
+    '    role: "protagonist"',
+    `    identity: "${english ? 'writer adapting an old event' : '正在改编旧事件的作者'}"`,
+    `    personality: "${english ? 'restrained, observant' : '克制、敏锐'}"`,
+    `    goal: "${english ? 'Turn hidden clues into a playable first draft.' : '把隐藏线索改写成可表演初稿。'}"`,
+    `    arc: "${english ? 'From reading evidence to speaking the truth aloud.' : '从阅读证据到说出真相。'}"`,
+    '    relationships:',
+    `      - target: "${witness}"`,
+    `        relation: "${english ? 'questions' : '追问'}"`,
+    '  - id: "char_002"',
+    `    name: "${witness}"`,
+    '    role: "supporting"',
+    `    identity: "${english ? 'keeper of the old event' : '旧事件知情人'}"`,
+    `    personality: "${english ? 'guarded' : '戒备'}"`,
+    `    goal: "${english ? 'Avoid saying the detail that changes the case.' : '回避改变案件判断的关键细节。'}"`,
+    `    arc: "${english ? 'From silence to reluctant testimony.' : '从沉默到勉强作证。'}"`,
+    '    relationships:',
+    `      - target: "${lead}"`,
+    `        relation: "${english ? 'answers under pressure' : '在压力下回答'}"`,
+    'plot_outline:',
+    '  - source_chapter: "Chapter 1-3"',
+    '    key_events:',
+    `      - "${english ? 'The lead receives a clue from the old event.' : '主角收到旧事件线索。'}"`,
+    `      - "${english ? 'The witness reveals the missing detail under pressure.' : '证人在压力下说出缺失细节。'}"`,
+    `    adaptation_choice: "${english ? 'Convert narration into visible action and speakable dialogue.' : '将叙述转换为可见动作和可说出口的对白。'}"`,
+    'scenes:',
+    '  - scene_id: "S001"',
+    '    scene_type: "INT"',
+    `    location: "${english ? 'Archive room' : '档案室'}"`,
+    '    time_of_day: "NIGHT"',
+    '    characters:',
+    `      - "${lead}"`,
+    `      - "${witness}"`,
+    `    summary: "${english ? 'The lead confronts the witness with a clue from the old event.' : '主角用旧事件线索逼问证人。'}"`,
+    `    dramatic_purpose: "${english ? 'Replace abstract discovery with playable pressure between two characters.' : '用两人之间的压力替代抽象发现。'}"`,
+    '    beats:',
+    '      - type: "action"',
+    `        content: "${english ? 'The lead places the letter under the desk lamp and waits until the witness looks at it.' : '主角把信放到台灯下，等证人看清信纸。'}"`,
+    '      - type: "dialogue"',
+    `        speaker: "${lead}"`,
+    `        content: "${english ? 'Do not summarize it for me. Say the line you refused to say that night.' : '别替我概括。把那晚你不肯说的话说出来。'}"`,
+    '      - type: "parenthetical"',
+    `        content: "${english ? 'The witness folds the edge of the letter but does not tear it.' : '证人折起信角，却没有把它撕掉。'}"`,
+    '      - type: "dialogue"',
+    `        speaker: "${witness}"`,
+    `        content: "${english ? 'The clock was not wrong. We made everyone believe it was.' : '钟没有错，是我们让所有人相信它错了。'}"`,
+    'notes:',
+    `  adaptation_summary: "${english ? 'Local mock output shaped as a playable screenplay YAML draft.' : '本地 mock 输出已整理为可表演剧本 YAML 初稿。'}"`,
+    '  omitted_elements: []',
+    '  risks:',
+    `    - "${english ? 'Mock output is only a fallback when the backend request fails.' : 'mock 输出只用于后端请求失败时降级展示。'}"`,
+    '  next_steps:',
+    `    - "${english ? 'Run the real backend conversion for full model-generated scenes.' : '运行真实后端转换以获得完整模型生成场景。'}"`
+  ].join('\n')
 }
 
 function estimateChapterCount(sourceText) {
@@ -518,6 +604,26 @@ function createInputAssistantChatFallback(payload) {
       ? payload.messages.filter((message) => message?.role === 'user').map((message) => message.text)
       : [])
   ].filter(Boolean).join('\n\n')
+
+  if (payload?.capability === 'style') {
+    const styleText = createStyleHintFallback(rawInput, payload?.currentStyleHint)
+    return {
+      enhancedInput: styleText,
+      styleHints: splitStyleHints(styleText),
+      formatHints: {
+        contentType: '小说转脚本',
+        tone: styleText
+      },
+      suggestions: [
+        '可以补充节奏偏好，例如紧凑或舒缓',
+        '可以补充情绪基调，例如温暖、压抑或轻松'
+      ],
+      usedFallback: true,
+      fallbackReason: '',
+      assistantMessage: '我先给出一版可直接放进风格提示的建议，你可以继续补充偏好的节奏或情绪。'
+    }
+  }
+
   const refined = createInputAssistantFallback({
     rawInput,
     selectedStyles: payload?.selectedStyles
@@ -527,6 +633,78 @@ function createInputAssistantChatFallback(payload) {
     ...refined,
     assistantMessage: payload?.capability === 'style'
       ? '我给出轻量风格建议，并整理了一个可回填的输入草稿。'
-      : '我已整理输入格式，并生成一个可回填的清晰草稿。'
+        : '我已整理输入格式，并生成一个可回填的清晰草稿。'
   }
+}
+
+function createStyleHintFallback(rawInput, currentStyleHint) {
+  const source = `${rawInput || ''}\n${currentStyleHint || ''}`
+  const hints = []
+  if (/悬疑|失踪|调查|真相|案件|秘密/.test(source)) {
+    hints.push('悬疑感')
+  }
+  if (/亲情|成长|和解|温暖|治愈/.test(source)) {
+    hints.push('治愈感')
+  }
+  if (/短剧|反转|爽点|冲突|钩子/.test(source)) {
+    hints.push('短剧感')
+  }
+  if (!hints.length) {
+    hints.push('电影感')
+  }
+
+  return [
+    `${hints.join('、')}，节奏清晰，场景有明确情绪推进。`,
+    '对白保持可表演、不过度解释，优先用动作和场面调度呈现人物关系。',
+    '风格仅作为软建议，不改变原文核心人物、事件和结局。'
+  ].join(' ')
+}
+
+function normalizeStyleApplyText(enhancedInput, assistantMessage, styleHints, payload) {
+  const candidates = [
+    enhancedInput,
+    assistantMessage,
+    Array.isArray(styleHints) ? styleHints.join('、') : '',
+    payload?.currentStyleHint || '',
+    ...(Array.isArray(payload?.messages)
+      ? payload.messages.filter((message) => message?.role === 'user').map((message) => message.text)
+      : [])
+  ]
+  const styleSentences = candidates
+    .flatMap((value) => extractStyleSentences(value))
+    .filter(Boolean)
+
+  const unique = [...new Set(styleSentences)]
+  let text = unique.join('。').trim()
+  if (!text) {
+    text = createStyleHintFallback('', payload?.currentStyleHint)
+  }
+  if (!text.includes('软建议')) {
+    text += ' 风格仅作为软建议，不改变原文核心人物、事件和结局。'
+  }
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/首页已有输入[:：].*/g, '')
+    .replace(/用户硬约束[:：].*/g, '')
+    .slice(0, 220)
+    .trim()
+}
+
+function extractStyleSentences(value) {
+  return String(value || '')
+    .replace(/【[^】]+】/g, '')
+    .replace(/首页已有输入[:：][\s\S]*/g, '')
+    .replace(/用户硬约束[:：][\s\S]*/g, '')
+    .replace(/正文[:：][\s\S]*/g, '')
+    .split(/[。！？!?\n]+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => /风格|基调|氛围|节奏|情绪|视听|画面|镜头|场景调度|对白|叙事|悬疑|治愈|电影感|短剧感|轻喜剧|赛博朋克|温柔|温暖|冷峻|压抑|轻松|年代感|抒情|回望|不悬疑|真实|细腻|克制|紧凑|舒缓|烟火气|日常感/.test(sentence))
+}
+
+function splitStyleHints(styleText) {
+  return String(styleText)
+    .split(/[、,，。；;\s]+/)
+    .map((style) => style.trim())
+    .filter(Boolean)
+    .slice(0, 6)
 }

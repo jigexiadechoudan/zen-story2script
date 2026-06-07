@@ -14,7 +14,7 @@ public record RagSearchRequest(
         targetFormat = normalize(targetFormat);
         promptSlot = normalize(promptSlot);
         query = query == null ? "" : query.trim();
-        topK = topK <= 0 ? 3 : topK;
+        topK = topK <= 0 ? 2 : topK;
     }
 
     private static String normalize(String value) {

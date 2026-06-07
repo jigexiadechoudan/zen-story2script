@@ -45,7 +45,8 @@ class AgentNovelToScreenplayService implements NovelToScreenplayService {
                 request.sourceText(),
                 request.targetFormat(),
                 request.styleHint(),
-                request.normalizedConversionMode()
+                request.normalizedConversionMode(),
+                request.normalizedLanguage()
         );
     }
 

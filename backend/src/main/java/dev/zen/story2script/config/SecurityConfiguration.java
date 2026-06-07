@@ -18,6 +18,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 import java.time.Clock;
+import jakarta.servlet.DispatcherType;
 
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
@@ -30,10 +31,9 @@ class SecurityConfiguration {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/health", "/api/schema", "/api/auth/register", "/api/auth/login").permitAll()
-                        .requestMatchers("/api/convert/**").authenticated()
-                        .requestMatchers("/api/assistant/**").authenticated()
-                        .anyRequest().authenticated()
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+                        .requestMatchers("/api/auth/me", "/api/auth/logout").authenticated()
+                        .anyRequest().permitAll()
                 )
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint((request, response, exception) ->

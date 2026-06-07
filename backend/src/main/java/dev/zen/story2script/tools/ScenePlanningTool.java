@@ -53,10 +53,14 @@ public class ScenePlanningTool {
                     "characters": [""],
                     "summary": "",
                     "dramaticPurpose": "",
+                    "playableMoments": ["specific physical action or spoken exchange that should appear on page"],
                     "sourceChapters": [""]
                   }],
                   "adaptationNotes": [""]
                 }
+                Plan scenes as performable screenplay scenes, not abstract plot cards.
+                Each scene must have enough conflict for at least one staged action and one line of dialogue.
+                Write all natural-language values in the requested output language.
                 Do not return Markdown code fences, commentary, or any text outside the JSON object.
                 """;
     }
@@ -64,6 +68,7 @@ public class ScenePlanningTool {
     private String userPrompt(ScenePlanningInput input) {
         return """
                 Title: %s
+                Output language: %s
                 Target format: %s
                 Target duration: %s
                 RAG knowledge:
@@ -72,6 +77,7 @@ public class ScenePlanningTool {
                 %s
                 """.formatted(
                 input.title(),
+                ToolInputs.nullToEmpty(input.language()),
                 ToolInputs.nullToEmpty(input.targetFormat()),
                 ToolInputs.nullToEmpty(input.targetDuration()),
                 ragKnowledge(input),
@@ -82,11 +88,13 @@ public class ScenePlanningTool {
     private String ragKnowledge(ScenePlanningInput input) {
         String query = """
                 title=%s
+                output_language=%s
                 target_format=%s
                 target_duration=%s
                 analysis=%s
                 """.formatted(
                 input.title(),
+                ToolInputs.nullToEmpty(input.language()),
                 ToolInputs.nullToEmpty(input.targetFormat()),
                 ToolInputs.nullToEmpty(input.targetDuration()),
                 input.analysisJson()
@@ -99,8 +107,12 @@ public class ScenePlanningTool {
             String title,
             String analysisJson,
             String targetFormat,
-            String targetDuration
+            String targetDuration,
+            String language
     ) {
+        public ScenePlanningInput(String title, String analysisJson, String targetFormat, String targetDuration) {
+            this(title, analysisJson, targetFormat, targetDuration, "zh-CN");
+        }
     }
 
     /**

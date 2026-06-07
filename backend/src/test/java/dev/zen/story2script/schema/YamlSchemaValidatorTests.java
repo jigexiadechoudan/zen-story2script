@@ -84,6 +84,36 @@ class YamlSchemaValidatorTests {
         });
     }
 
+    @Test
+    void sceneWithoutDialogueFails() {
+        String yaml = validYaml().replace("""
+                      - type: "dialogue"
+                        speaker: "Chen Mo"
+                        content: "You should not have come back."
+                """, "");
+
+        YamlSchemaValidationResult result = validator.validate(yaml);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).anySatisfy(error -> {
+            assertThat(error.path()).isEqualTo("$.scenes[0].beats");
+            assertThat(error.code()).isEqualTo("SCENE_MISSING_DIALOGUE_BEAT");
+        });
+    }
+
+    @Test
+    void dialogueWithoutSpeakerFails() {
+        String yaml = validYaml().replaceAll("(?m)^\\s+speaker: \"Chen Mo\"\\R?", "");
+
+        YamlSchemaValidationResult result = validator.validate(yaml);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).anySatisfy(error -> {
+            assertThat(error.path()).isEqualTo("$.scenes[0].beats[1].speaker");
+            assertThat(error.code()).isEqualTo("MISSING_FIELD");
+        });
+    }
+
     /**
      * 测试用最小合法样例，内容字段保持简单，重点验证结构而不是文学质量。
      */

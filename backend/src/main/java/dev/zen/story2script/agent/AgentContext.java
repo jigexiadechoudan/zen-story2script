@@ -37,6 +37,17 @@ public record AgentContext(
         return new AgentContext(title, sourceText, null, null, targetFormat, null, styleHint, conversionMode);
     }
 
+    public static AgentContext of(
+            String title,
+            String sourceText,
+            String targetFormat,
+            @Nullable String styleHint,
+            String conversionMode,
+            @Nullable String language
+    ) {
+        return new AgentContext(title, sourceText, null, language, targetFormat, null, styleHint, conversionMode);
+    }
+
     public boolean fastMode() {
         return "fast".equals(conversionMode);
     }

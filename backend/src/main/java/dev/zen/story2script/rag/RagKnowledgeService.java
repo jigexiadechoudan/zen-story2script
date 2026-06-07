@@ -18,8 +18,8 @@ public class RagKnowledgeService {
     private final int defaultTopK;
 
     @Autowired
-    public RagKnowledgeService(RagKnowledgeRetriever retriever) {
-        this(retriever, 3);
+    public RagKnowledgeService(RagKnowledgeRetriever retriever, RagProperties properties) {
+        this(retriever, properties.getTopK());
     }
 
     RagKnowledgeService(RagKnowledgeRetriever retriever, int defaultTopK) {

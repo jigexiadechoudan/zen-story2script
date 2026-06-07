@@ -210,9 +210,23 @@ public class YamlSchemaValidator {
                 continue;
             }
 
+            validateRequiredSceneFields(sceneMap, scenePath, errors);
             validateSceneType(sceneMap, scenePath, errors);
             validateBeats(sceneMap, scenePath, errors);
         }
+    }
+
+    private void validateRequiredSceneFields(
+            Map<?, ?> sceneMap,
+            String scenePath,
+            List<YamlSchemaValidationError> errors
+    ) {
+        validateRequiredTextField(sceneMap, scenePath, "scene_id", errors);
+        validateRequiredTextField(sceneMap, scenePath, "location", errors);
+        validateRequiredTextField(sceneMap, scenePath, "time_of_day", errors);
+        validateRequiredListField(sceneMap, scenePath, "characters", errors);
+        validateRequiredTextField(sceneMap, scenePath, "summary", errors);
+        validateRequiredTextField(sceneMap, scenePath, "dramatic_purpose", errors);
     }
 
     /**
@@ -267,6 +281,17 @@ public class YamlSchemaValidator {
             return;
         }
 
+        if (beatList.isEmpty()) {
+            errors.add(error(
+                    scenePath + ".beats",
+                    "LIST_EMPTY",
+                    "Field 'beats' must contain playable action or dialogue beats."
+            ));
+            return;
+        }
+
+        boolean hasAction = false;
+        boolean hasDialogue = false;
         for (int beatIndex = 0; beatIndex < beatList.size(); beatIndex++) {
             Object beat = beatList.get(beatIndex);
             String beatPath = scenePath + ".beats[" + beatIndex + "]";
@@ -297,6 +322,69 @@ public class YamlSchemaValidator {
                         "beats[].type must be one of " + ScreenplayYamlSchema.BEAT_TYPES + "."
                 ));
             }
+            validateRequiredTextField(beatMap, beatPath, "content", errors);
+            if ("action".equals(typeValue)) {
+                hasAction = true;
+            }
+            if ("dialogue".equals(typeValue)) {
+                hasDialogue = true;
+                validateRequiredTextField(beatMap, beatPath, "speaker", errors);
+            }
+        }
+
+        if (!hasAction) {
+            errors.add(error(
+                    scenePath + ".beats",
+                    "SCENE_MISSING_ACTION_BEAT",
+                    "Each scene must include at least one action beat actors and directors can stage."
+            ));
+        }
+        if (!hasDialogue) {
+            errors.add(error(
+                    scenePath + ".beats",
+                    "SCENE_MISSING_DIALOGUE_BEAT",
+                    "Each scene must include at least one dialogue beat actors can perform."
+            ));
+        }
+    }
+
+    private void validateRequiredTextField(
+            Map<?, ?> map,
+            String path,
+            String field,
+            List<YamlSchemaValidationError> errors
+    ) {
+        Object value = map.get(field);
+        if (value == null || String.valueOf(value).isBlank()) {
+            errors.add(error(
+                    path + "." + field,
+                    "MISSING_FIELD",
+                    "Field '" + field + "' is required and must not be blank."
+            ));
+        }
+    }
+
+    private void validateRequiredListField(
+            Map<?, ?> map,
+            String path,
+            String field,
+            List<YamlSchemaValidationError> errors
+    ) {
+        Object value = map.get(field);
+        if (!(value instanceof List<?> list)) {
+            errors.add(error(
+                    path + "." + field,
+                    "FIELD_TYPE_INVALID",
+                    "Field '" + field + "' must be a list."
+            ));
+            return;
+        }
+        if (list.isEmpty()) {
+            errors.add(error(
+                    path + "." + field,
+                    "LIST_EMPTY",
+                    "Field '" + field + "' must not be empty."
+            ));
         }
     }
 

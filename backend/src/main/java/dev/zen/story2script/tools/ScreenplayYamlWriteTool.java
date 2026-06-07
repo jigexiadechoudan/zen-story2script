@@ -67,6 +67,16 @@ public class ScreenplayYamlWriteTool {
                 Top-level fields must be exactly: %s.
                 Scene scene_type values must be one of: %s.
                 Beat type values must be one of: %s.
+                This YAML is a screenplay draft for actors and directors, not a plot outline.
+                Every scene must include scene_id, scene_type, location, time_of_day, characters, summary,
+                dramatic_purpose, and beats.
+                Every scene must contain at least one action beat and one dialogue beat.
+                Every beat must include content. Dialogue beats must also include speaker.
+                All natural-language YAML values, including titles, summaries, character descriptions, action
+                content, dialogue content, notes, and adaptation choices, must be written in the requested output
+                language. Keep YAML keys and enum values in the schema language exactly as specified.
+                Write concrete playable action and speakable dialogue. Avoid abstract outline lines such as
+                "the protagonist discovers the truth" unless the beat also shows what the actor does or says.
                 Do not return Markdown code fences, commentary, or any text outside the YAML document.
                 """.formatted(
                 ScreenplayYamlSchema.VERSION,
@@ -85,6 +95,7 @@ public class ScreenplayYamlWriteTool {
                 Target format: %s
                 Target duration: %s
                 Style hint: %s
+                Output language: %s
                 RAG knowledge:
                 %s
                 Story analysis JSON:
@@ -98,6 +109,7 @@ public class ScreenplayYamlWriteTool {
                 ToolInputs.nullToEmpty(input.targetFormat()),
                 ToolInputs.nullToEmpty(input.targetDuration()),
                 ToolInputs.nullToEmpty(input.styleHint()),
+                ToolInputs.nullToEmpty(input.language()),
                 ragKnowledge(input),
                 input.analysisJson(),
                 input.scenePlanJson()
@@ -114,8 +126,18 @@ public class ScreenplayYamlWriteTool {
                 - Top-level fields must be exactly: %s.
                 - Scene scene_type values must be one of: %s.
                 - Beat type values must be one of: %s.
+                - Output a playable screenplay draft, not a scene outline.
+                - Every scene must include scene_id, scene_type, location, time_of_day, characters, summary,
+                  dramatic_purpose, and beats.
+                - Every scene must contain at least one action beat and one dialogue beat.
+                - Every beat must include content. Dialogue beats must also include speaker.
+                - All natural-language YAML values must be written in the requested output language.
+                - Keep YAML keys and enum values in the schema language exactly as specified.
+                - Action beats must describe visible stageable behavior, props, movement, silence, or reaction.
+                - Dialogue beats must be lines actors can speak directly, with subtext and conflict.
+                - Do not use vague outline beat types like discovery, confrontation, turning_point, or resolution.
                 - Prefer 3 to 6 scenes for short_drama, 4 to 8 scenes for screenplay, and 3 to 8 outline scenes.
-                - Each scene should contain 2 to 4 beats only.
+                - Each scene should contain 4 to 8 beats when source material allows it.
                 - Keep dialogue concise. Avoid long monologues.
                 - Do not return Markdown code fences, commentary, or any text outside the YAML document.
                 """.formatted(
@@ -134,6 +156,7 @@ public class ScreenplayYamlWriteTool {
                 Target format: %s
                 Target duration: %s
                 Style hint: %s
+                Output language: %s
                 RAG knowledge:
                 %s
 
@@ -146,6 +169,7 @@ public class ScreenplayYamlWriteTool {
                 ToolInputs.nullToEmpty(input.targetFormat()),
                 ToolInputs.nullToEmpty(input.targetDuration()),
                 ToolInputs.nullToEmpty(input.styleHint()),
+                ToolInputs.nullToEmpty(input.language()),
                 ragKnowledge(input),
                 formatChapters(input.chapters())
         );
@@ -154,12 +178,14 @@ public class ScreenplayYamlWriteTool {
     private String ragKnowledge(ScreenplayYamlWriteInput input) {
         String query = """
                 title=%s
+                output_language=%s
                 target_format=%s
                 style_hint=%s
                 analysis=%s
                 scene_plan=%s
                 """.formatted(
                 input.title(),
+                ToolInputs.nullToEmpty(input.language()),
                 ToolInputs.nullToEmpty(input.targetFormat()),
                 ToolInputs.nullToEmpty(input.styleHint()),
                 input.analysisJson(),
@@ -172,11 +198,13 @@ public class ScreenplayYamlWriteTool {
     private String ragKnowledge(FastScreenplayYamlWriteInput input) {
         String query = """
                 title=%s
+                output_language=%s
                 target_format=%s
                 style_hint=%s
                 chapters=%s
                 """.formatted(
                 input.title(),
+                ToolInputs.nullToEmpty(input.language()),
                 ToolInputs.nullToEmpty(input.targetFormat()),
                 ToolInputs.nullToEmpty(input.styleHint()),
                 formatChapters(input.chapters())

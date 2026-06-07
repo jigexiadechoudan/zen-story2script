@@ -30,14 +30,15 @@ public class VectorStoreRagKnowledgeRetriever implements RagKnowledgeRetriever {
     @Override
     public List<Document> retrieve(RagSearchRequest request) {
         String filter = "target_format == '%s'".formatted(escape(request.targetFormat()));
+        int topK = request.topK() <= 0 ? properties.getTopK() : request.topK();
         return vectorStore.similaritySearch(SearchRequest.builder()
                 .query(request.query())
-                .topK(Math.max(request.topK() <= 0 ? properties.getTopK() : request.topK(), 8))
+                .topK(topK)
                 .similarityThreshold(properties.getSimilarityThreshold())
                 .filterExpression(filter)
                 .build()).stream()
                 .filter(document -> promptSlotMatches(document, request.promptSlot()))
-                .limit(request.topK() <= 0 ? properties.getTopK() : request.topK())
+                .limit(topK)
                 .toList();
     }
 

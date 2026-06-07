@@ -42,6 +42,9 @@ public class YamlRepairTool {
                 Top-level fields must be exactly: %s.
                 Scene scene_type values must be one of: %s.
                 Beat type values must be one of: %s.
+                Every scene must include at least one action beat and one dialogue beat.
+                Every beat must include content. Dialogue beats must include speaker.
+                Preserve or add concrete playable action and speakable dialogue when validation errors require it.
                 Return only the repaired YAML document.
                 Do not return Markdown code fences, commentary, or any text outside the YAML document.
                 """.formatted(

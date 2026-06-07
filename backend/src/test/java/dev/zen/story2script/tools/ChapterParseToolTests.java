@@ -45,10 +45,10 @@ class ChapterParseToolTests {
 
         assertThat(output.valid()).isFalse();
         assertThat(output.errorMessage())
-                .contains("at least 3 chapters")
-                .contains("found 2")
-                .contains("第1章")
+                .contains("至少提供 3 章")
+                .contains("当前识别到 2 章")
                 .contains("第一章")
+                .contains("第1章")
                 .contains("Chapter 1");
         assertThat(output.chapters()).hasSize(2);
     }

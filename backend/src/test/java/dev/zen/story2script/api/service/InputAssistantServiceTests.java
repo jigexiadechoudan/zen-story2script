@@ -54,6 +54,7 @@ class InputAssistantServiceTests {
         AssistantChatResponse response = service.chat(new AssistantChatRequest(
                 "format",
                 "",
+                "",
                 List.of(new AssistantChatMessage("user", "女孩回乡调查父亲失踪")),
                 List.of("悬疑"),
                 "story_to_script_home"
@@ -71,6 +72,7 @@ class InputAssistantServiceTests {
         AssistantChatResponse response = service.chat(new AssistantChatRequest(
                 "style",
                 "",
+                "",
                 List.of(new AssistantChatMessage("user", "女孩回乡调查父亲失踪")),
                 List.of(),
                 "story_to_script_home"
@@ -78,9 +80,9 @@ class InputAssistantServiceTests {
 
         assertThat(response.assistantMessage()).contains("风格建议");
         assertThat(response.enhancedInput())
-                .contains("【风格偏好/软建议】")
-                .contains("【风格执行方向】")
-                .contains("悬疑");
+                .contains("悬疑")
+                .contains("风格仅作为软建议")
+                .doesNotContain("【用户硬约束】", "【待补充项】");
         assertThat(response.suggestions()).contains("可以补充节奏偏好，例如紧凑或舒缓");
     }
 }

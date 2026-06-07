@@ -41,7 +41,8 @@ class AgentNovelToScreenplayServiceTests {
                 "Chapter 1\nA\nChapter 2\nB\nChapter 3\nC",
                 "short_drama",
                 "restrained",
-                "react"
+                "react",
+                "en"
         ));
 
         assertThat(response.yaml()).isEqualTo("schema_version: \"1.0\"");
@@ -70,9 +71,75 @@ class AgentNovelToScreenplayServiceTests {
                 "Chapter 1\nA\nChapter 2\nB\nChapter 3\nC",
                 "short_drama",
                 "restrained",
+                null,
                 null
         ));
 
         verify(agent).convert(org.mockito.ArgumentMatchers.argThat(AgentContext::fastMode));
+    }
+
+    @Test
+    void exposesFriendlyChapterParseFailureInWarningsAndQualityChecks() {
+        NovelToScreenplayAgent agent = mock(NovelToScreenplayAgent.class);
+        String message = "未能识别到足够章节。请至少提供 3 章，并使用‘第一章’‘第1章’或‘Chapter 1’这类章节标题。当前识别到 2 章。";
+        when(agent.convert(any(AgentContext.class))).thenReturn(new AgentResult(
+                "",
+                AgentResult.QualityReport.failure(
+                        "CHAPTER_PARSE_FAILED",
+                        message,
+                        List.of("chapter_parse"),
+                        List.of()
+                ),
+                new AgentResult.AgentTrace(
+                        "react",
+                        List.of(new AgentResult.Step(1, "chapter_parse", "Parsed 2 chapters; valid=false.")),
+                        1
+                ),
+                List.of(message)
+        ));
+        AgentNovelToScreenplayService service = new AgentNovelToScreenplayService(agent);
+
+        ConvertResponse response = service.convert(new ConvertRequest(
+                "Too Short",
+                "Chapter 1\nA\nChapter 2\nB",
+                "short_drama",
+                null,
+                "react",
+                null
+        ));
+
+        assertThat(response.warnings())
+                .contains("CHAPTER_PARSE_FAILED")
+                .anySatisfy(warning -> assertThat(warning)
+                        .contains("至少提供 3 章")
+                        .contains("当前识别到 2 章"));
+        assertThat(response.qualityReport().checks())
+                .contains("chapter_parse")
+                .anySatisfy(check -> assertThat(check)
+                        .contains("至少提供 3 章")
+                        .contains("当前识别到 2 章"));
+    }
+
+    @Test
+    void mapsRequestLanguageToAgentContext() {
+        NovelToScreenplayAgent agent = mock(NovelToScreenplayAgent.class);
+        when(agent.convert(any(AgentContext.class))).thenReturn(new AgentResult(
+                "schema_version: \"1.0\"",
+                AgentResult.QualityReport.success(List.of("fast_mode"), List.of()),
+                new AgentResult.AgentTrace("fast", List.of(), 0),
+                List.of()
+        ));
+        AgentNovelToScreenplayService service = new AgentNovelToScreenplayService(agent);
+
+        service.convert(new ConvertRequest(
+                "Fog Town Letter",
+                "Chapter 1\nA\nChapter 2\nB\nChapter 3\nC",
+                "short_drama",
+                "restrained",
+                "fast",
+                "en"
+        ));
+
+        verify(agent).convert(org.mockito.ArgumentMatchers.argThat(context -> "en-US".equals(context.language())));
     }
 }

@@ -18,8 +18,6 @@ final class AgentState {
     private final List<AgentResult.Step> traceSteps = new ArrayList<>();
 
     private ChapterParseTool.ChapterParseOutput chapterParseOutput;
-    private String analysisJson;
-    private String scenePlanJson;
     private String yaml;
     private YamlSchemaValidationResult validationResult;
     private int repairAttempts;
@@ -49,14 +47,6 @@ final class AgentState {
         return chapterParseOutput;
     }
 
-    String analysisJson() {
-        return analysisJson;
-    }
-
-    String scenePlanJson() {
-        return scenePlanJson;
-    }
-
     YamlSchemaValidationResult validationResult() {
         return validationResult;
     }
@@ -69,28 +59,8 @@ final class AgentState {
         return traceSteps.size();
     }
 
-    boolean chaptersParsed() {
-        return chapterParseOutput != null;
-    }
-
     boolean chapterParseFailed() {
         return chapterParseOutput != null && !chapterParseOutput.valid();
-    }
-
-    boolean storyAnalyzed() {
-        return analysisJson != null;
-    }
-
-    boolean scenesPlanned() {
-        return scenePlanJson != null;
-    }
-
-    boolean yamlWritten() {
-        return yaml != null;
-    }
-
-    boolean validationNeeded() {
-        return yamlWritten() && validationResult == null;
     }
 
     boolean yamlValid() {
@@ -104,16 +74,6 @@ final class AgentState {
     void observeChapterParse(ChapterParseTool.ChapterParseOutput output) {
         chapterParseOutput = output;
         checks.add("chapter_parse");
-    }
-
-    void observeStoryAnalysis(String output) {
-        analysisJson = output;
-        checks.add("story_analysis");
-    }
-
-    void observeScenePlan(String output) {
-        scenePlanJson = output;
-        checks.add("scene_planning");
     }
 
     void observeYamlWrite(String output) {

@@ -19,6 +19,7 @@ spring:
       chat:
         options:
           temperature: 0.2
+          max-tokens: ${OPENAI_MAX_TOKENS:4096}
       embedding:
         base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
         api-key: ${DASHSCOPE_API_KEY}
@@ -47,7 +48,7 @@ story2script:
   rag:
     vector-store-enabled: ${STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED:true}
     sync-on-startup: ${STORY2SCRIPT_RAG_SYNC_ON_STARTUP:true}
-    top-k: ${STORY2SCRIPT_RAG_TOP_K:3}
+    top-k: ${STORY2SCRIPT_RAG_TOP_K:2}
     similarity-threshold: ${STORY2SCRIPT_RAG_SIMILARITY_THRESHOLD:0.0}
 
 logging:

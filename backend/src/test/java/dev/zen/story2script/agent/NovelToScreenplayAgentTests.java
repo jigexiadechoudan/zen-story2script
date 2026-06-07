@@ -3,9 +3,7 @@ package dev.zen.story2script.agent;
 import dev.zen.story2script.schema.YamlSchemaValidator;
 import dev.zen.story2script.config.DevFallbackToolLlmClientConfiguration;
 import dev.zen.story2script.tools.ChapterParseTool;
-import dev.zen.story2script.tools.ScenePlanningTool;
 import dev.zen.story2script.tools.ScreenplayYamlWriteTool;
-import dev.zen.story2script.tools.StoryAnalysisTool;
 import dev.zen.story2script.tools.ToolLlmClient;
 import dev.zen.story2script.tools.YamlRepairTool;
 import org.junit.jupiter.api.Test;
@@ -20,13 +18,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NovelToScreenplayAgentTests {
 
     @Test
-    void completesFullConversionFlowWithMockTools() {
-        SequencedLlmClient llmClient = new SequencedLlmClient(List.of(
-                "{\"characters\":[],\"events\":[],\"conflicts\":[]}",
-                "{\"scenes\":[],\"adaptationNotes\":[]}",
-                validYaml()
-        ));
-        NovelToScreenplayAgent agent = agent(llmClient, NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS);
+    void reactModeFallsBackToFastWhenAutonomousDependenciesAreUnavailable() {
+        SequencedLlmClient llmClient = new SequencedLlmClient(List.of(validYaml()));
+        NovelToScreenplayAgent agent = agent(llmClient);
 
         AgentResult result = agent.convert(AgentContext.of(
                 "Fog Town Letter",
@@ -38,24 +32,24 @@ class NovelToScreenplayAgentTests {
         assertThat(result.qualityReport().success()).isTrue();
         assertThat(result.yaml()).isEqualTo(validYaml());
         assertThat(result.qualityReport().checks()).containsExactly(
+                "fast_mode",
                 "chapter_parse",
-                "story_analysis",
-                "scene_planning",
                 "yaml_write",
                 "yaml_validation"
         );
-        assertThat(result.agentTrace().toolCalls()).isEqualTo(5);
+        assertThat(result.agentTrace().toolCalls()).isEqualTo(3);
         assertThat(result.agentTrace().steps())
                 .extracting(AgentResult.Step::tool)
-                .containsExactly("chapter_parse", "story_analysis", "scene_planning", "yaml_write", "yaml_validation");
+                .containsExactly("chapter_parse", "yaml_write", "yaml_validation");
         assertThat(result.warnings()).isEmpty();
-        assertThat(llmClient.calls()).hasSize(3);
+        assertThat(llmClient.calls()).hasSize(1);
+        assertThat(llmClient.calls().getFirst()).contains("Parsed chapters:");
     }
 
     @Test
     void fastModeSkipsIntermediateLlmCalls() {
         SequencedLlmClient llmClient = new SequencedLlmClient(List.of(validYaml()));
-        NovelToScreenplayAgent agent = agent(llmClient, NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS);
+        NovelToScreenplayAgent agent = agent(llmClient);
 
         AgentResult result = agent.convert(AgentContext.of(
                 "Fog Town Letter",
@@ -86,7 +80,7 @@ class NovelToScreenplayAgentTests {
                 "schema_version: \"1.0\"",
                 validYaml()
         ));
-        NovelToScreenplayAgent agent = agent(llmClient, NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS);
+        NovelToScreenplayAgent agent = agent(llmClient);
 
         AgentResult result = agent.convert(AgentContext.of(
                 "Fog Town Letter",
@@ -111,7 +105,7 @@ class NovelToScreenplayAgentTests {
     @Test
     void fewerThanThreeChaptersReturnsClearError() {
         SequencedLlmClient llmClient = new SequencedLlmClient(List.of());
-        NovelToScreenplayAgent agent = agent(llmClient, NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS);
+        NovelToScreenplayAgent agent = agent(llmClient);
 
         AgentResult result = agent.convert(AgentContext.of(
                 "Too Short",
@@ -128,8 +122,13 @@ class NovelToScreenplayAgentTests {
         assertThat(result.qualityReport().success()).isFalse();
         assertThat(result.qualityReport().errorCode()).isEqualTo("CHAPTER_PARSE_FAILED");
         assertThat(result.qualityReport().message())
-                .contains("at least 3 chapters")
-                .contains("found 2");
+                .contains("至少提供 3 章")
+                .contains("当前识别到 2 章");
+        assertThat(result.qualityReport().checks()).contains("chapter_parse");
+        assertThat(result.warnings()).singleElement()
+                .asString()
+                .contains("至少提供 3 章")
+                .contains("当前识别到 2 章");
         assertThat(result.agentTrace().toolCalls()).isEqualTo(1);
         assertThat(result.agentTrace().steps()).singleElement()
                 .extracting(AgentResult.Step::tool)
@@ -138,13 +137,9 @@ class NovelToScreenplayAgentTests {
     }
 
     @Test
-    void exceedingMaxStepsReturnsStepLimitError() {
-        SequencedLlmClient llmClient = new SequencedLlmClient(List.of(
-                "{\"characters\":[],\"events\":[],\"conflicts\":[]}",
-                "{\"scenes\":[],\"adaptationNotes\":[]}",
-                validYaml()
-        ));
-        NovelToScreenplayAgent agent = agent(llmClient, 4);
+    void reactFallbackAlwaysUsesFastWhenAutonomousDependenciesAreUnavailable() {
+        SequencedLlmClient llmClient = new SequencedLlmClient(List.of(validYaml()));
+        NovelToScreenplayAgent agent = agent(llmClient);
 
         AgentResult result = agent.convert(AgentContext.of(
                 "Fog Town Letter",
@@ -153,24 +148,21 @@ class NovelToScreenplayAgentTests {
                 null
         ));
 
-        assertThat(result.qualityReport().success()).isFalse();
-        assertThat(result.qualityReport().errorCode()).isEqualTo(NovelToScreenplayAgent.AGENT_STEP_LIMIT_EXCEEDED);
-        assertThat(result.warnings()).contains(NovelToScreenplayAgent.AGENT_STEP_LIMIT_EXCEEDED);
-        assertThat(result.agentTrace().toolCalls()).isEqualTo(4);
+        assertThat(result.qualityReport().success()).isTrue();
+        assertThat(result.qualityReport().errorCode()).isEmpty();
+        assertThat(result.agentTrace().toolCalls()).isEqualTo(3);
         assertThat(result.agentTrace().steps())
                 .extracting(AgentResult.Step::tool)
-                .containsExactly("chapter_parse", "story_analysis", "scene_planning", "yaml_write", "step_limit");
+                .containsExactly("chapter_parse", "yaml_write", "yaml_validation");
     }
 
     @Test
     void validationFailureCallsRepairAtMostOnce() {
         SequencedLlmClient llmClient = new SequencedLlmClient(List.of(
-                "{\"characters\":[],\"events\":[],\"conflicts\":[]}",
-                "{\"scenes\":[],\"adaptationNotes\":[]}",
                 "schema_version: \"1.0\"",
                 validYaml()
         ));
-        NovelToScreenplayAgent agent = agent(llmClient, NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS);
+        NovelToScreenplayAgent agent = agent(llmClient);
 
         AgentResult result = agent.convert(AgentContext.of(
                 "Fog Town Letter",
@@ -182,9 +174,8 @@ class NovelToScreenplayAgentTests {
         assertThat(result.qualityReport().success()).isTrue();
         assertThat(result.yaml()).isEqualTo(validYaml());
         assertThat(result.qualityReport().checks()).containsExactly(
+                "fast_mode",
                 "chapter_parse",
-                "story_analysis",
-                "scene_planning",
                 "yaml_write",
                 "yaml_validation",
                 "yaml_repair",
@@ -194,15 +185,13 @@ class NovelToScreenplayAgentTests {
                 .extracting(AgentResult.Step::tool)
                 .containsExactly(
                         "chapter_parse",
-                        "story_analysis",
-                        "scene_planning",
                         "yaml_write",
                         "yaml_validation",
                         "yaml_repair",
                         "yaml_validation"
                 );
         assertThat(result.warnings()).contains("YAML was repaired after initial validation failure.");
-        assertThat(llmClient.calls()).hasSize(4);
+        assertThat(llmClient.calls()).hasSize(2);
     }
 
     @Test
@@ -210,13 +199,9 @@ class NovelToScreenplayAgentTests {
         ToolLlmClient llmClient = new DevFallbackToolLlmClientConfiguration.DevFallbackToolLlmClient();
         NovelToScreenplayAgent agent = new NovelToScreenplayAgent(
                 new ChapterParseTool(),
-                new StoryAnalysisTool(llmClient),
-                new ScenePlanningTool(llmClient),
                 new ScreenplayYamlWriteTool(llmClient),
                 new YamlSchemaValidator(),
                 new YamlRepairTool(llmClient),
-                new RuleBasedAgentPlanner(),
-                NovelToScreenplayAgent.DEFAULT_MAX_TOOL_CALLS,
                 llmClient.devFallback()
         );
 
@@ -249,61 +234,23 @@ class NovelToScreenplayAgentTests {
                 .extracting(AgentResult.Step::summary)
                 .anyMatch(summary -> summary.contains("已进入 dev fallback"))
                 .anyMatch(summary -> summary.contains("已解析章节"))
-                .anyMatch(summary -> summary.contains("已生成示例 YAML"))
+                .anyMatch(summary -> summary.contains("YAML"))
                 .anyMatch(summary -> summary.contains("未调用真实大模型"));
         assertThat(result.qualityReport().checks())
                 .contains("chapterCount=3")
                 .contains("characterCount=2")
                 .contains("sceneCount=3")
-                .contains("reactSteps=7")
+                .contains("reactSteps=5")
                 .contains("repaired=false");
     }
 
-    @Test
-    void plannerChoosesActionsFromObservationsUntilFinish() {
-        RuleBasedAgentPlanner planner = new RuleBasedAgentPlanner();
-        AgentState state = new AgentState(AgentContext.of(
-                "Fog Town Letter",
-                sourceText(),
-                "short_drama",
-                null
-        ));
-
-        assertThat(planner.decide(state).action()).isEqualTo(AgentAction.PARSE_CHAPTERS);
-
-        state.observeChapterParse(new ChapterParseTool.ChapterParseOutput(
-                true,
-                "",
-                List.of(
-                        new ChapterParseTool.ParsedChapter(1, "Chapter 1", "A"),
-                        new ChapterParseTool.ParsedChapter(2, "Chapter 2", "B"),
-                        new ChapterParseTool.ParsedChapter(3, "Chapter 3", "C")
-                )
-        ));
-        assertThat(planner.decide(state).action()).isEqualTo(AgentAction.ANALYZE_STORY);
-
-        state.observeStoryAnalysis("{\"characters\":[]}");
-        assertThat(planner.decide(state).action()).isEqualTo(AgentAction.PLAN_SCENES);
-
-        state.observeScenePlan("{\"scenes\":[]}");
-        assertThat(planner.decide(state).action()).isEqualTo(AgentAction.WRITE_YAML);
-
-        state.observeYamlWrite(validYaml());
-        assertThat(planner.decide(state).action()).isEqualTo(AgentAction.VALIDATE_YAML);
-
-        state.observeYamlValidation(new YamlSchemaValidator().validate(validYaml()), "yaml_validation");
-        assertThat(planner.decide(state).action()).isEqualTo(AgentAction.FINISH);
-    }
-
-    private NovelToScreenplayAgent agent(SequencedLlmClient llmClient, int maxToolCalls) {
+    private NovelToScreenplayAgent agent(SequencedLlmClient llmClient) {
         return new NovelToScreenplayAgent(
                 new ChapterParseTool(),
-                new StoryAnalysisTool(llmClient),
-                new ScenePlanningTool(llmClient),
                 new ScreenplayYamlWriteTool(llmClient),
                 new YamlSchemaValidator(),
                 new YamlRepairTool(llmClient),
-                maxToolCalls
+                false
         );
     }
 

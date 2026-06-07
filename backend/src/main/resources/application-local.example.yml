@@ -73,7 +73,7 @@ story2script:
   rag:
     vector-store-enabled: ${STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED:true}
     sync-on-startup: ${STORY2SCRIPT_RAG_SYNC_ON_STARTUP:false}
-    top-k: ${STORY2SCRIPT_RAG_TOP_K:3}
+    top-k: ${STORY2SCRIPT_RAG_TOP_K:2}
     similarity-threshold: ${STORY2SCRIPT_RAG_SIMILARITY_THRESHOLD:0.0}
 
 server:

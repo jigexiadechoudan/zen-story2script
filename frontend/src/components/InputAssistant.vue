@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ArrowLeft, Check, Grip, LoaderCircle, Send, WandSparkles, X } from 'lucide-vue-next'
-import { chatWithInputAssistant } from '../api'
+import { chatWithInputAssistant, refineInput } from '../api'
 
 const props = defineProps({
   sourceText: {
@@ -19,17 +19,22 @@ const emit = defineEmits(['apply'])
 const STORAGE_KEY = 'story2script.inputAssistant.position'
 const DEFAULT_POSITION = { right: 24, bottom: 24 }
 const MAX_CONTEXT_MESSAGES = 8
+const BUTTON_SIZE = 54
+const PANEL_WIDTH = 390
+const PANEL_HEIGHT = 620
+const VIEWPORT_MARGIN = 12
+const PANEL_GAP = 10
 const capabilityOptions = [
-  { id: 'format', label: '整理输入格式', hint: '把零散想法整理成清晰段落' },
-  { id: 'style', label: '轻量风格建议', hint: '提示可选风格，不改核心意思' }
+  { id: 'format', label: '整理输入格式', hint: '立即把首页正文整理成可提交的清晰输入' },
+  { id: 'style', label: '轻量风格建议', hint: '基于正文给出可回填到风格提示的建议' }
 ]
-const styleOptions = ['悬疑', '治愈', '电影感', '短剧感', '轻喜剧', '赛博朋克']
 
 const isOpen = ref(false)
 const interactionStarted = ref(false)
 const refining = ref(false)
 const result = ref(null)
 const userDraft = ref('')
+const formatDraft = ref('')
 const errorMessage = ref('')
 const statusMessage = ref('')
 const messages = ref([])
@@ -37,15 +42,14 @@ const assistantButton = ref(null)
 const panel = ref(null)
 const position = reactive(loadPosition())
 const draft = reactive({
-  selectedCapability: '',
-  selectedStyles: []
+  selectedCapability: ''
 })
 
 let dragState = null
 
 const panelStyle = computed(() => ({
-  right: `${position.right}px`,
-  bottom: `${position.bottom + 62}px`
+  left: `${panelPosition.value.left}px`,
+  top: `${panelPosition.value.top}px`
 }))
 
 const triggerStyle = computed(() => ({
@@ -53,8 +57,33 @@ const triggerStyle = computed(() => ({
   bottom: `${position.bottom}px`
 }))
 
-const canSend = computed(() => userDraft.value.trim().length > 0 && !refining.value)
-const canApply = computed(() => Boolean(result.value?.enhancedInput))
+const panelPosition = computed(() => {
+  const viewportWidth = window.innerWidth || PANEL_WIDTH
+  const viewportHeight = window.innerHeight || PANEL_HEIGHT
+  const panelWidth = Math.min(PANEL_WIDTH, viewportWidth - VIEWPORT_MARGIN * 2)
+  const panelHeight = Math.min(PANEL_HEIGHT, viewportHeight - 90)
+  const buttonLeft = viewportWidth - position.right - BUTTON_SIZE
+  const buttonTop = viewportHeight - position.bottom - BUTTON_SIZE
+  const buttonCenterX = buttonLeft + BUTTON_SIZE / 2
+  const buttonCenterY = buttonTop + BUTTON_SIZE / 2
+
+  let left = buttonCenterX < viewportWidth / 2
+    ? buttonLeft
+    : buttonLeft + BUTTON_SIZE - panelWidth
+  let top = buttonCenterY < viewportHeight / 2
+    ? buttonTop + BUTTON_SIZE + PANEL_GAP
+    : buttonTop - panelHeight - PANEL_GAP
+
+  left = clamp(left, VIEWPORT_MARGIN, viewportWidth - panelWidth - VIEWPORT_MARGIN)
+  top = clamp(top, VIEWPORT_MARGIN, viewportHeight - panelHeight - VIEWPORT_MARGIN)
+
+  return { left, top }
+})
+
+const isFormatMode = computed(() => draft.selectedCapability === 'format')
+const isStyleMode = computed(() => draft.selectedCapability === 'style')
+const canSend = computed(() => isStyleMode.value && userDraft.value.trim().length > 0 && !refining.value)
+const canApply = computed(() => isFormatMode.value && Boolean(result.value?.enhancedInput) && !refining.value)
 
 onMounted(() => {
   window.addEventListener('resize', clampAndPersistPosition)
@@ -69,32 +98,9 @@ function togglePanel() {
   isOpen.value = !isOpen.value
   statusMessage.value = ''
   errorMessage.value = ''
-
   if (isOpen.value) {
-    seedStyles()
+    clampAndPersistPosition()
   }
-}
-
-function seedStyles() {
-  if (!draft.selectedStyles.length && props.styleHint.trim()) {
-    draft.selectedStyles = props.styleHint
-      .split(/[、,，]/)
-      .map((style) => style.trim())
-      .filter((style) => styleOptions.includes(style))
-  }
-}
-
-function seedConversation() {
-  if (messages.value.length) {
-    return
-  }
-
-  messages.value = [{
-    role: 'assistant',
-    text: props.sourceText?.trim()
-      ? `已选择：${selectedCapabilityLabel()}。我看到首页已有输入，你可以像聊天一样继续补充。`
-      : `已选择：${selectedCapabilityLabel()}。直接告诉我故事、梗概或章节想法。`
-  }]
 }
 
 function closePanel() {
@@ -107,10 +113,17 @@ function selectCapability(id) {
   messages.value = []
   result.value = null
   userDraft.value = ''
+  formatDraft.value = ''
   statusMessage.value = ''
   errorMessage.value = ''
-  seedConversation()
-  nextTick(() => panel.value?.querySelector('textarea')?.focus())
+
+  if (id === 'format') {
+    formatDraft.value = props.sourceText.trim()
+    nextTick(() => panel.value?.querySelector('.assistant-format-input')?.focus())
+    return
+  }
+
+  startStyleConversation()
 }
 
 function backToCapabilitySelect() {
@@ -118,57 +131,96 @@ function backToCapabilitySelect() {
   messages.value = []
   result.value = null
   userDraft.value = ''
+  formatDraft.value = ''
   statusMessage.value = ''
   errorMessage.value = ''
 }
 
-function toggleStyle(style) {
-  if (draft.selectedStyles.includes(style)) {
-    draft.selectedStyles = draft.selectedStyles.filter((item) => item !== style)
-  } else {
-    draft.selectedStyles = [...draft.selectedStyles, style]
-  }
-  statusMessage.value = ''
-}
-
-async function handleSend() {
-  const text = userDraft.value.trim()
-  if (!text) {
+async function runFormatRefine() {
+  const rawInput = formatDraft.value.trim() || props.sourceText.trim()
+  if (!rawInput) {
+    statusMessage.value = '请先粘贴需要整理的内容，或在首页正文输入框填写内容。'
     return
   }
 
-  appendMessage({ role: 'user', text })
-  userDraft.value = ''
+  refining.value = true
+  try {
+    const response = await refineInput({
+      rawInput,
+      selectedStyles: [],
+      target: 'story_to_script_home'
+    })
+    result.value = response
+    statusMessage.value = response.usedFallback
+      ? (response.fallbackReason || '模型暂不可用，已用本地整理。')
+      : '已完成格式整理，可以应用到首页正文输入。'
+  } catch {
+    errorMessage.value = '输入助手暂时不可用，请稍后重试。'
+  } finally {
+    refining.value = false
+  }
+}
+
+async function startStyleConversation() {
+  messages.value = [{
+    role: 'assistant',
+    text: props.sourceText.trim()
+      ? '我会先读取首页正文，给出可放进“风格提示”的轻量建议。'
+      : '首页正文还没有内容。你可以直接描述故事或想要的风格，我会给出可回填的风格提示。'
+  }]
+
+  if (!props.sourceText.trim()) {
+    nextTick(() => panel.value?.querySelector('textarea')?.focus())
+    return
+  }
+
+  await requestStyleAdvice()
+}
+
+async function requestStyleAdvice() {
   refining.value = true
   errorMessage.value = ''
   statusMessage.value = ''
 
   try {
     const response = await chatWithInputAssistant({
-      capability: draft.selectedCapability || 'format',
+      capability: 'style',
       homeInput: props.sourceText.trim(),
+      currentStyleHint: props.styleHint.trim(),
       messages: messages.value.map((message) => ({
         role: message.role,
         text: message.text
       })),
-      selectedStyles: draft.selectedStyles,
+      selectedStyles: [],
       target: 'story_to_script_home'
     })
     result.value = response
     appendMessage({
       role: 'assistant',
-      text: response.assistantMessage || '我已整理当前输入，你可以继续补充或应用到首页。',
+      text: response.assistantMessage || '我已给出风格建议，你可以继续追问或应用到首页风格提示。',
       suggestions: response.suggestions || []
     })
     statusMessage.value = response.usedFallback
-      ? (response.fallbackReason || '模型暂不可用，已用本地整理。')
+      ? (response.fallbackReason || '模型暂不可用，已用本地风格建议。')
       : ''
   } catch {
     errorMessage.value = '输入助手暂时不可用，请稍后重试。'
   } finally {
     refining.value = false
     scrollToBottom()
+    nextTick(() => panel.value?.querySelector('textarea')?.focus())
   }
+}
+
+async function handleSend() {
+  const text = userDraft.value.trim()
+  if (!text || !isStyleMode.value) {
+    return
+  }
+
+  appendMessage({ role: 'user', text })
+  userDraft.value = ''
+  await requestStyleAdvice()
 }
 
 function appendMessage(message) {
@@ -186,6 +238,7 @@ function scrollToBottom() {
 
 function buildContextInput() {
   return [
+    formatDraft.value.trim(),
     props.sourceText.trim(),
     ...messages.value.filter((message) => message.role === 'user').map((message) => message.text),
     result.value?.enhancedInput || ''
@@ -211,9 +264,10 @@ function handleApply() {
   emit('apply', {
     enhancedInput: result.value.enhancedInput,
     styleHints: result.value.styleHints,
-    rawInput: buildContextInput()
+    rawInput: buildContextInput(),
+    applyTarget: 'source'
   })
-  statusMessage.value = '已应用到首页输入。'
+  statusMessage.value = '已应用到首页正文输入。'
 }
 
 function startDrag(event) {
@@ -275,12 +329,14 @@ function clampAndPersistPosition() {
 }
 
 function clampPosition() {
-  const margin = 12
-  const buttonSize = 54
-  const maxRight = Math.max(margin, window.innerWidth - buttonSize - margin)
-  const maxBottom = Math.max(margin, window.innerHeight - buttonSize - margin)
-  position.right = Math.min(Math.max(position.right, margin), maxRight)
-  position.bottom = Math.min(Math.max(position.bottom, margin), maxBottom)
+  const maxRight = Math.max(VIEWPORT_MARGIN, window.innerWidth - BUTTON_SIZE - VIEWPORT_MARGIN)
+  const maxBottom = Math.max(VIEWPORT_MARGIN, window.innerHeight - BUTTON_SIZE - VIEWPORT_MARGIN)
+  position.right = clamp(position.right, VIEWPORT_MARGIN, maxRight)
+  position.bottom = clamp(position.bottom, VIEWPORT_MARGIN, maxBottom)
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max)
 }
 
 function loadPosition() {
@@ -353,38 +409,63 @@ function persistPosition() {
           </button>
         </div>
 
-        <div class="assistant-chat-log" aria-live="polite">
-          <div
-            v-for="(message, index) in messages"
-            :key="`${message.role}-${index}-${message.text}`"
-            class="assistant-chat-message"
-            :class="`assistant-chat-${message.role}`"
-          >
-            <p>{{ message.text }}</p>
-            <ul v-if="message.suggestions?.length" class="assistant-chat-suggestions">
-              <li v-for="suggestion in message.suggestions.slice(0, 3)" :key="suggestion">{{ suggestion }}</li>
-            </ul>
-          </div>
-          <div v-if="refining" class="assistant-chat-message assistant-chat-assistant">
-            <p><LoaderCircle :size="14" class="assistant-spin" aria-hidden="true" />正在思考...</p>
-          </div>
-        </div>
+        <template v-if="isFormatMode">
+          <div class="assistant-format-body">
+            <label class="assistant-format-editor">
+              <span>粘贴需要整理的内容</span>
+              <textarea
+                v-model="formatDraft"
+                class="assistant-format-input"
+                placeholder="粘贴故事梗概、章节内容或零散需求；留空时会使用首页正文输入框内容。"
+                rows="7"
+              />
+            </label>
 
-        <div class="assistant-style-strip" role="group" aria-label="风格标签">
-          <button
-            v-for="style in styleOptions"
-            :key="style"
-            type="button"
-            class="assistant-chip"
-            :class="{ active: draft.selectedStyles.includes(style) }"
-            @click="toggleStyle(style)"
-          >
-            <Check v-if="draft.selectedStyles.includes(style)" :size="13" aria-hidden="true" />
-            {{ style }}
-          </button>
-        </div>
+            <button
+              type="button"
+              class="icon-text-button assistant-format-submit"
+              :disabled="refining || (!formatDraft.trim() && !props.sourceText.trim())"
+              @click="runFormatRefine"
+            >
+              <LoaderCircle v-if="refining" :size="15" class="assistant-spin" aria-hidden="true" />
+              {{ refining ? '正在整理...' : '整理输入格式' }}
+            </button>
 
-        <div v-if="statusMessage" class="assistant-message success" role="status">{{ statusMessage }}</div>
+            <div v-if="result?.enhancedInput" class="assistant-format-result">
+              <span>整理结果预览</span>
+              <pre>{{ result.enhancedInput }}</pre>
+              <ul v-if="result.suggestions?.length" class="assistant-chat-suggestions">
+                <li v-for="suggestion in result.suggestions.slice(0, 3)" :key="suggestion">{{ suggestion }}</li>
+              </ul>
+            </div>
+            <div v-else-if="statusMessage" class="assistant-format-state">
+              {{ statusMessage }}
+            </div>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="assistant-chat-log" aria-live="polite">
+            <div
+              v-for="(message, index) in messages"
+              :key="`${message.role}-${index}-${message.text}`"
+              class="assistant-chat-message"
+              :class="`assistant-chat-${message.role}`"
+            >
+              <p>{{ message.text }}</p>
+              <ul v-if="message.suggestions?.length" class="assistant-chat-suggestions">
+                <li v-for="suggestion in message.suggestions.slice(0, 3)" :key="suggestion">{{ suggestion }}</li>
+              </ul>
+            </div>
+            <div v-if="refining" class="assistant-chat-message assistant-chat-assistant">
+              <p><LoaderCircle :size="14" class="assistant-spin" aria-hidden="true" />正在思考...</p>
+            </div>
+          </div>
+        </template>
+
+        <div v-if="statusMessage && (isStyleMode || result?.enhancedInput)" class="assistant-message success" role="status">
+          {{ statusMessage }}
+        </div>
         <div v-if="errorMessage" class="assistant-message error" role="alert">{{ errorMessage }}</div>
 
         <div v-if="canApply" class="assistant-apply-row">
@@ -393,10 +474,10 @@ function persistPosition() {
           </button>
         </div>
 
-        <div class="assistant-chat-composer">
+        <div v-if="isStyleMode" class="assistant-chat-composer">
           <textarea
             v-model="userDraft"
-            placeholder="输入你的想法，Ctrl+Enter 发送"
+            placeholder="继续补充风格想法，Ctrl+Enter 发送"
             rows="1"
             @keydown="handleKeydown"
           />

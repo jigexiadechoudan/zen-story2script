@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { motion } from 'motion-v'
 import { ApiError, convertNovel, getCurrentUser, login, logout, register } from './api'
 import AppHeader from './components/AppHeader.vue'
@@ -18,6 +18,8 @@ const targetOptions = [
   { value: 'screenplay', label: '影视剧本' },
   { value: 'scene_outline', label: '分场大纲' }
 ]
+
+const TOAST_DURATION_MS = 14000
 
 const conversionModeOptions = [
   { value: 'fast', label: '快速模式' },
@@ -52,12 +54,17 @@ const authMode = ref('login')
 const currentUser = ref(null)
 const streamSteps = ref([])
 const elapsedSeconds = ref(0)
+const toastMessages = ref([])
 let elapsedTimer = null
+let nextToastId = 1
+const toastTimers = new Map()
 
 const localeOptions = [
   { value: 'zh', label: '中文' },
   { value: 'en', label: 'EN' }
 ]
+
+const outputLanguage = computed(() => (locale.value === 'en' ? 'en-US' : 'zh-CN'))
 
 const messages = {
   zh: {
@@ -78,7 +85,17 @@ const messages = {
     titleLabel: '小说标题',
     titlePlaceholder: '雾镇来信',
     sourceLabel: '小说正文',
-    sourcePlaceholder: '第一章 ...\n\n第二章 ...\n\n第三章 ...',
+    sourcePlaceholder: '第一章 归来\n这里粘贴第一章正文...\n\n第二章 旧信\n这里粘贴第二章正文...\n\n第三章 车站\n这里粘贴第三章正文...',
+    sourceFormatIntro: '请粘贴至少 3 章小说正文，每章前面单独写一行章节标题。支持这些写法：',
+    sourceSupportedFormats: [
+      '第一章 归来',
+      '第1章 归来',
+      '# 第一章 归来',
+      '## 第二章 旧信',
+      'Chapter 1 The Station'
+    ],
+    sourceExampleTitle: '查看 3 章粘贴示例',
+    sourceExample: '第一章 归来\n这里粘贴第一章正文，保留完整段落。\n\n第二章 旧信\n这里粘贴第二章正文，继续保留章节内容。\n\n第三章 车站\n这里粘贴第三章正文，然后再开始转换。',
     targetLabel: '改编目标',
     modeLabel: '转换模式',
     modeSummary: '当前模式',
@@ -111,7 +128,7 @@ const messages = {
     networkFailed: '网络请求失败，请检查后端服务或稍后重试。',
     requireTitle: '请先填写小说标题。',
     requireSource: '请粘贴小说正文。',
-    requireChapters: '至少需要 3 个章节后才能开始转换。支持“第一章”“# 第二章”“Chapter 1”等标题格式。',
+    requireChapters: '当前识别到 {count} 章，需要至少 3 章。请在每章前单独写一行标题，例如“第一章”“第1章”或“Chapter 1”。',
     sourceTooShort: '小说正文过短，请补充每章的主要情节后再转换。',
     chapterReady: '已满足章节要求',
     chapterMissing: '至少需要 3 个章节后才能开始转换',
@@ -185,7 +202,17 @@ const messages = {
     titleLabel: 'Novel title',
     titlePlaceholder: 'Letter from Fog Town',
     sourceLabel: 'Novel text',
-    sourcePlaceholder: 'Chapter 1 ...\n\nChapter 2 ...\n\nChapter 3 ...',
+    sourcePlaceholder: 'Chapter 1 The Station\nPaste chapter 1 text here...\n\nChapter 2 The Letter\nPaste chapter 2 text here...\n\nChapter 3 The Witness\nPaste chapter 3 text here...',
+    sourceFormatIntro: 'Paste at least 3 chapters. Put each chapter title on its own line. Supported examples:',
+    sourceSupportedFormats: [
+      '第一章 归来',
+      '第1章 归来',
+      '# 第一章 归来',
+      '## 第二章 旧信',
+      'Chapter 1 The Station'
+    ],
+    sourceExampleTitle: 'Show a 3-chapter template',
+    sourceExample: 'Chapter 1 The Station\nPaste the first chapter text here.\n\nChapter 2 The Letter\nPaste the second chapter text here.\n\nChapter 3 The Witness\nPaste the third chapter text here before converting.',
     targetLabel: 'Adaptation target',
     modeLabel: 'Conversion mode',
     modeSummary: 'Mode',
@@ -218,7 +245,7 @@ const messages = {
     networkFailed: 'Network request failed. Check the backend service and try again.',
     requireTitle: 'Please enter a novel title.',
     requireSource: 'Please paste the novel text.',
-    requireChapters: 'Please enter at least 3 chapters. Supported headings include 第一章, # 第二章, and Chapter 1.',
+    requireChapters: 'Detected {count} chapter(s). Please provide at least 3 chapters, with headings such as 第一章, 第1章, or Chapter 1 on separate lines.',
     sourceTooShort: 'The novel text is too short. Add the main events for each chapter before converting.',
     chapterReady: 'Chapter requirement met',
     chapterMissing: 'At least 3 chapters are required before conversion',
@@ -290,7 +317,7 @@ const authMessages = {
     displayNameLabel: '昵称',
     displayNamePlaceholder: '编剧工作者',
     inviteCodeLabel: '注册邀请码',
-    inviteCodePlaceholder: '输入私有邀请码',
+    inviteCodePlaceholder: '默认邀请码：dev-invite',
     loginButton: '登录工作台',
     registerButton: '注册并登录',
     logoutButton: '登出',
@@ -317,7 +344,7 @@ const authMessages = {
     displayNameLabel: 'Display name',
     displayNamePlaceholder: 'Screenwriter',
     inviteCodeLabel: 'Invite code',
-    inviteCodePlaceholder: 'Enter your private invite code',
+    inviteCodePlaceholder: 'Default invite code: dev-invite',
     loginButton: 'Sign in',
     registerButton: 'Register and sign in',
     logoutButton: 'Sign out',
@@ -376,22 +403,19 @@ const localizedQualityEntries = computed(() => {
   if (!report || typeof report !== 'object') {
     return []
   }
-  return Object.entries(report).map(([key, value]) => ({
-    key,
-    label: t.value.qualityKeys[key] || key,
-    value: formatQualityValue(key, value)
-  }))
-})
-const statusMessages = computed(() => {
-  if (!result.value) {
-    return []
-  }
+  return Object.entries(report)
+    .filter(([key]) => key !== 'conversionMode')
+    .map(([key, value]) => {
+      const displayValue = key === 'checks' && Array.isArray(value)
+        ? value.filter((item) => item !== 'fast_mode' && item !== 'react_mode')
+        : value
 
-  return [
-    result.value.networkMessage,
-    result.value.localMockMessage,
-    result.value.backendFallbackMessage
-  ].filter(Boolean)
+      return {
+        key,
+        label: t.value.qualityKeys[key] || key,
+        value: formatQualityValue(key, displayValue)
+      }
+    })
 })
 const headerStatusBadges = computed(() => {
   if (result.value?.usedMock) {
@@ -419,6 +443,11 @@ onMounted(async () => {
   } finally {
     authChecking.value = false
   }
+})
+
+onBeforeUnmount(() => {
+  stopElapsedTimer()
+  clearToasts()
 })
 
 async function handleAuthSubmit() {
@@ -471,6 +500,7 @@ async function handleLogout() {
     result.value = null
     streamSteps.value = []
     stopElapsedTimer()
+    clearToasts()
     loading.value = false
   }
 }
@@ -484,6 +514,7 @@ function switchAuthMode(mode) {
 async function handleConvert() {
   errorMessage.value = ''
   actionMessage.value = ''
+  clearToasts()
 
   const validationMessage = validateForm()
   if (validationMessage) {
@@ -501,7 +532,8 @@ async function handleConvert() {
       sourceText: form.sourceText.trim(),
       targetFormat: form.targetFormat,
       styleHint: form.styleHint.trim(),
-      conversionMode: form.conversionMode
+      conversionMode: form.conversionMode,
+      language: outputLanguage.value
     }, (event) => {
       if (event.payload?.type === 'status') {
         streamSteps.value = [...streamSteps.value, event.payload.message]
@@ -510,6 +542,7 @@ async function handleConvert() {
         streamSteps.value = [...streamSteps.value, event.payload.message]
       }
     })
+    showStatusToasts(statusMessagesFor(result.value))
   } catch (error) {
     if (error instanceof ApiError) {
       errorMessage.value = error.message
@@ -528,6 +561,12 @@ function handleAssistantApply(payload) {
     return
   }
 
+  if (payload?.applyTarget === 'style') {
+    form.styleHint = normalizeAssistantStyleHint(enhancedInput)
+    actionMessage.value = '首页输入助手已回填风格提示。'
+    return
+  }
+
   form.sourceText = enhancedInput
 
   const newStyles = Array.isArray(payload?.styleHints)
@@ -542,6 +581,53 @@ function handleAssistantApply(payload) {
   }
 
   actionMessage.value = '首页输入助手已回填正文输入区。'
+}
+
+function normalizeAssistantStyleHint(value) {
+  const text = String(value || '')
+    .replace(/【[^】]+】/g, '')
+    .replace(/首页已有输入[:：][\s\S]*/g, '')
+    .replace(/用户硬约束[:：][\s\S]*/g, '')
+    .replace(/正文[:：][\s\S]*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.slice(0, 220)
+}
+
+function statusMessagesFor(convertResult) {
+  if (!convertResult) {
+    return []
+  }
+
+  return [
+    convertResult.networkMessage,
+    convertResult.localMockMessage,
+    convertResult.backendFallbackMessage
+  ].filter(Boolean)
+}
+
+function showStatusToasts(messages) {
+  messages.forEach((message) => {
+    const id = nextToastId++
+    toastMessages.value = [...toastMessages.value, { id, message }]
+    const timer = window.setTimeout(() => dismissToast(id), TOAST_DURATION_MS)
+    toastTimers.set(id, timer)
+  })
+}
+
+function dismissToast(id) {
+  const timer = toastTimers.get(id)
+  if (timer) {
+    window.clearTimeout(timer)
+    toastTimers.delete(id)
+  }
+  toastMessages.value = toastMessages.value.filter((toast) => toast.id !== id)
+}
+
+function clearToasts() {
+  toastTimers.forEach((timer) => window.clearTimeout(timer))
+  toastTimers.clear()
+  toastMessages.value = []
 }
 
 async function copyYaml() {
@@ -586,7 +672,7 @@ function validateForm() {
   }
 
   if (chapterCount.value < 3) {
-    return t.value.requireChapters
+    return t.value.requireChapters.replace('{count}', chapterCount.value)
   }
 
   if (sourceLength.value < 80) {
@@ -698,6 +784,21 @@ function sanitizeFileName(value) {
       @logout="handleLogout"
     />
 
+    <div v-if="toastMessages.length" class="toast-viewport" aria-live="polite" aria-label="提示消息">
+      <motion.div
+        v-for="toast in toastMessages"
+        :key="toast.id"
+        class="toast-bubble toast-warning"
+        role="status"
+        :initial="{ opacity: 0, x: 28, scale: 0.98 }"
+        :animate="{ opacity: 1, x: 0, scale: 1 }"
+        :transition="{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }"
+      >
+        <StatusBadge tone="warning" icon="warning" :label="toast.message" />
+        <button type="button" class="toast-close" aria-label="关闭提示" @click="dismissToast(toast.id)">×</button>
+      </motion.div>
+    </div>
+
     <AuthPanel
       v-if="authChecking || !currentUser"
       :checking="authChecking"
@@ -760,16 +861,6 @@ function sanitizeFileName(value) {
           {{ actionMessage }}
         </div>
 
-        <div v-if="statusMessages.length" class="status-message-stack">
-          <StatusBadge
-            v-for="message in statusMessages"
-            :key="message"
-            tone="warning"
-            icon="warning"
-            :label="message"
-          />
-        </div>
-
         <YamlPreview
           :kicker="t.resultKicker"
           :title="t.resultTitle"
@@ -807,6 +898,7 @@ function sanitizeFileName(value) {
         />
       </motion.section>
     </section>
+
     <InputAssistant
       v-if="currentUser"
       :source-text="form.sourceText"

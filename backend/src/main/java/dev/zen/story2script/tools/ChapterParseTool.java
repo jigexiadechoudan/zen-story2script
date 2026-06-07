@@ -41,13 +41,17 @@ public class ChapterParseTool {
         if (chapters.size() < MIN_CHAPTER_COUNT) {
             return new ChapterParseOutput(
                     false,
-                    "ChapterParseTool requires at least 3 chapters, but found %d. Supported headings: \u7b2c1\u7ae0, \u7b2c\u4e00\u7ae0, # \u7b2c\u4e00\u7ae0, ## \u7b2c\u4e00\u7ae0, Chapter 1."
-                            .formatted(chapters.size()),
+                    chapterCountError(chapters.size()),
                     chapters
             );
         }
 
         return new ChapterParseOutput(true, "", chapters);
+    }
+
+    private String chapterCountError(int chapterCount) {
+        return "\u672a\u80fd\u8bc6\u522b\u5230\u8db3\u591f\u7ae0\u8282\u3002\u8bf7\u81f3\u5c11\u63d0\u4f9b 3 \u7ae0\uff0c\u5e76\u4f7f\u7528\u2018\u7b2c\u4e00\u7ae0\u2019\u2018\u7b2c1\u7ae0\u2019\u6216\u2018Chapter 1\u2019\u8fd9\u7c7b\u7ae0\u8282\u6807\u9898\u3002\u5f53\u524d\u8bc6\u522b\u5230 %d \u7ae0\u3002"
+                .formatted(chapterCount);
     }
 
     private List<HeadingMatch> findHeadings(String sourceText) {

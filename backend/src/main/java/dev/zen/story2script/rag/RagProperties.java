@@ -7,7 +7,7 @@ public class RagProperties {
 
     private boolean vectorStoreEnabled;
     private boolean syncOnStartup;
-    private int topK = 3;
+    private int topK = 2;
     private double similarityThreshold = 0.0;
 
     public boolean isVectorStoreEnabled() {
