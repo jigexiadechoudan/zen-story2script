@@ -1,6 +1,7 @@
 package dev.zen.story2script.config;
 
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.web.cors.CorsConfiguration;
@@ -20,10 +21,10 @@ import java.util.List;
 @Configuration(proxyBeanMethods = false)
 public class WebCorsConfiguration implements WebMvcConfigurer {
 
-    private static final String[] DEV_ORIGINS = {
+    private static final List<String> DEFAULT_ORIGINS = List.of(
             "http://localhost:5173",
             "http://127.0.0.1:5173"
-    };
+    );
 
     private static final String[] API_METHODS = {
             "GET",
@@ -37,10 +38,22 @@ public class WebCorsConfiguration implements WebMvcConfigurer {
             "Accept"
     };
 
+    private final List<String> allowedOrigins;
+
+    public WebCorsConfiguration(
+            @Value("${story2script.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+            String allowedOrigins) {
+        List<String> configuredOrigins = List.of(allowedOrigins.split(",")).stream()
+                .map(String::trim)
+                .filter(origin -> !origin.isBlank())
+                .toList();
+        this.allowedOrigins = configuredOrigins.isEmpty() ? DEFAULT_ORIGINS : configuredOrigins;
+    }
+
     @org.springframework.context.annotation.Bean
     FilterRegistrationBean<CorsFilter> apiCorsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(DEV_ORIGINS));
+        config.setAllowedOrigins(allowedOrigins);
         config.setAllowedMethods(List.of(API_METHODS));
         config.setAllowedHeaders(List.of(API_HEADERS));
         config.setAllowCredentials(true);
@@ -58,7 +71,7 @@ public class WebCorsConfiguration implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         // 只开放 API 路径，避免把静态资源或未来非 API 路径一并暴露给跨域访问。
         registry.addMapping("/api/**")
-                .allowedOrigins(DEV_ORIGINS)
+                .allowedOrigins(allowedOrigins.toArray(String[]::new))
                 .allowedMethods(API_METHODS)
                 .allowedHeaders(API_HEADERS)
                 .allowCredentials(true)
