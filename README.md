@@ -4,6 +4,13 @@ Zen Story2Script 是一个“小说文本转结构化剧本 YAML”的 AI Agent 
 
 当前仓库定位为 MVP：功能链路完整、可本地演示、可接入 OpenAI-compatible 模型，也支持无密钥的 `dev` profile 降级演示。
 
+## 评审入口
+
+- Demo 视频：[Bilibili - Zen Story2Script 作品演示](https://www.bilibili.com/video/BV1XbEb6DEQX/)
+- 剧本 YAML Schema 文档：[docs/screenplay-yaml-schema.md](docs/screenplay-yaml-schema.md)
+
+Schema 文档已单独定义剧本 YAML Schema，并说明字段设计原因、校验规则和为什么该结构适合“小说转可表演剧本初稿”。
+
 ## 技术栈
 
 后端：
@@ -244,4 +251,4 @@ npm run build
 
 ## Demo 视频
 
-- Demo 视频链接：`TODO`
+- [Bilibili - Zen Story2Script 作品演示](https://www.bilibili.com/video/BV1XbEb6DEQX/)
