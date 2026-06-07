@@ -1,6 +1,6 @@
 # Zen Story2Script
 
-Zen Story2Script 是一个“小说文本转结构化剧本 YAML”的 AI Agent Web 应用。用户登录后输入至少 3 章小说文本，选择改编目标和转换模式，后端通过 Agent 完成章节解析、故事分析、场景规划、YAML 生成、Schema 校验和必要修复，前端通过 SSE 展示实时进度，最终展示可复制、可下载的结构化 YAML 剧本草稿。
+Zen Story2Script 是一个“小说文本转结构化剧本 YAML”的 AI Agent Web 应用。前端登录后进入工作台，用户输入至少 3 章小说文本，选择改编目标和转换模式，后端通过 Agent 完成章节解析、故事分析、场景规划、YAML 生成、Schema 校验和必要修复，前端通过 SSE 展示实时进度，最终展示可复制、可下载的结构化 YAML 剧本草稿。
 
 当前仓库定位为 MVP：功能链路完整、可本地演示、可接入 OpenAI-compatible 模型，也支持无密钥的 `dev` profile 降级演示。
 
@@ -31,7 +31,8 @@ Zen Story2Script 是一个“小说文本转结构化剧本 YAML”的 AI Agent 
 
 - 注册、登录、登出、当前用户查询
 - HTTP-only Cookie
-- `/api/convert/**` 需要登录
+- 前端登录只负责进入工作台页面
+- 后端转换接口不依赖登录态，便于单独联调和演示转换能力
 
 ## 目录
 
@@ -102,6 +103,19 @@ mvn spring-boot:run
 
 `application-local.yml` 已被 `.gitignore` 忽略，可以保存本机私有配置；仓库只提交 `application-local.example.yml` 模板。
 
+## 转换模式
+
+- `fast`：固定快速链路，按“章节解析 -> YAML 生成 -> Schema 校验 -> 必要时修复一次”的流程执行，优先保证速度和可用性。
+- `react`：在满足自主 ReAct 条件时，由模型自主决定是否调用工具，并受超时控制；如果依赖不满足、调用失败、超时或返回 YAML 校验不通过，会自动回退到 `fast`，确保仍能产出可用结果。
+
+自主 ReAct 条件：
+
+- `STORY2SCRIPT_AGENT_AUTONOMOUS_ENABLED=true`
+- 已配置可用的 ChatClient / OpenAI-compatible 模型
+- 已加载工具回调提供器
+- 当前不是 `dev` fallback
+- 请求的 `conversionMode` 不是 `fast`
+
 ## 前端环境变量
 
 前端默认访问 `http://localhost:8080`。如需修改后端地址：
@@ -120,13 +134,13 @@ npm run dev
 - `GET /api/schema`：返回前端联调用的轻量 API 契约摘要。
 - `POST /api/auth/register`：注册并写入 HTTP-only Cookie。
 - `POST /api/auth/login`：登录并写入 HTTP-only Cookie。
+- `POST /api/convert`：同步返回 YAML、质量报告、warnings 和 agentTrace。
+- `POST /api/convert/stream`：通过 SSE 返回转换状态、步骤和最终结果。
 
-登录后接口：
+需要登录态的认证接口：
 
 - `GET /api/auth/me`：读取当前用户。
 - `POST /api/auth/logout`：清除登录 Cookie。
-- `POST /api/convert`：同步返回 YAML、质量报告、warnings 和 agentTrace。
-- `POST /api/convert/stream`：通过 SSE 返回转换状态、步骤和最终结果。
 
 转换请求：
 
@@ -170,11 +184,25 @@ npm run dev
 | `AUTH_TOKEN_SECRET` | 开发占位值 | 登录 token 签名密钥，真实环境必须替换 |
 | `AUTH_TOKEN_TTL_SECONDS` | `604800` | 登录态有效期，单位秒 |
 | `REGISTRATION_INVITE_CODE` | `dev-invite` | 注册邀请码，公开部署必须替换 |
-| `STORY2SCRIPT_AGENT_MAX_STEPS` | `8` | Agent 最大执行步骤 |
+| `STORY2SCRIPT_AGENT_AUTONOMOUS_ENABLED` | `true` | 是否允许 `react` 使用自主 ReAct 工具调用 |
+| `STORY2SCRIPT_AGENT_AUTONOMOUS_TIMEOUT` | `45s` | 自主 ReAct 最大等待时间，超时后回退 `fast` |
+| `STORY2SCRIPT_AGENT_MAX_INPUT_CHARS` | `12000` | 自主 ReAct 输入文本截断上限 |
 | `STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED` | `false` | 是否启用向量检索 |
 | `STORY2SCRIPT_RAG_SYNC_ON_STARTUP` | `false` | 是否启动时同步内置知识 |
-| `STORY2SCRIPT_RAG_TOP_K` | `3` | RAG 检索片段数 |
+| `STORY2SCRIPT_RAG_TOP_K` | `2` | RAG 检索片段数 |
 | `VITE_API_BASE_URL` | `http://localhost:8080` | 前端 API 基础地址 |
+
+## Docker 部署
+
+仓库提供 `docker-compose.yml`、`.env.example` 和前端 Nginx 构建配置，可用于服务器部署。
+
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env，填入数据库、模型、鉴权密钥等真实配置
+docker compose up -d --build
+```
+
+阿里云 ECS 部署可参考 [docs/alicloud-docker-deployment.md](docs/alicloud-docker-deployment.md)。
 
 ## 验证命令
 
@@ -203,6 +231,7 @@ npm run build
 - [需求文档](docs/requirements.md)
 - [架构设计](docs/architecture.md)
 - [本地开发与演示](docs/local-development.md)
+- [阿里云 Docker 部署](docs/alicloud-docker-deployment.md)
 - [MVP 工作计划](docs/mvp-workplan.md)
 - [剧本 YAML Schema](docs/screenplay-yaml-schema.md)
 
