@@ -32,6 +32,7 @@ class SecurityConfiguration {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health", "/api/schema", "/api/auth/register", "/api/auth/login").permitAll()
                         .requestMatchers("/api/convert/**").authenticated()
+                        .requestMatchers("/api/assistant/**").authenticated()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(exceptions -> exceptions

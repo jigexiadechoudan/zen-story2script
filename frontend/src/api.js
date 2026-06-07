@@ -11,6 +11,75 @@ const formatLabels = {
   scene_outline: '分场大纲'
 }
 
+export async function refineInput(payload) {
+  const fallback = () => createInputAssistantFallback(payload)
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/assistant/refine-input`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    })
+    const data = await parseJsonResponse(response)
+
+    if (!response.ok) {
+      return {
+        ...fallback(),
+        usedFallback: true,
+        fallbackReason: data?.message || '输入助手接口暂不可用，已使用本地整理。'
+      }
+    }
+
+    return normalizeInputAssistantResponse(data)
+  } catch {
+    return {
+      ...fallback(),
+      usedFallback: true,
+      fallbackReason: '输入助手接口连接失败，已使用本地整理。'
+    }
+  }
+}
+
+export async function chatWithInputAssistant(payload) {
+  const fallback = () => createInputAssistantChatFallback(payload)
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/assistant/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    })
+    const data = await parseJsonResponse(response)
+
+    if (!response.ok) {
+      return {
+        ...fallback(),
+        usedFallback: true,
+        fallbackReason: data?.message || '输入助手聊天接口暂不可用，已使用本地整理。'
+      }
+    }
+
+    return {
+      ...normalizeInputAssistantResponse(data),
+      assistantMessage: String(data?.assistantMessage || '').trim() || '我已整理当前输入。',
+      usedFallback: false,
+      fallbackReason: ''
+    }
+  } catch {
+    return {
+      ...fallback(),
+      usedFallback: true,
+      fallbackReason: '输入助手聊天接口连接失败，已使用本地整理。'
+    }
+  }
+}
+
 export async function convertNovel(payload, onEvent) {
   if (typeof ReadableStream !== 'undefined') {
     return convertNovelStream(payload, onEvent)
@@ -378,4 +447,86 @@ function estimateChapterCount(sourceText) {
 
 function escapeYamlValue(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+function normalizeInputAssistantResponse(data) {
+  const enhancedInput = String(data?.enhancedInput || '').trim()
+  const styleHints = Array.isArray(data?.styleHints) ? data.styleHints.filter(Boolean).map(String) : []
+  const suggestions = Array.isArray(data?.suggestions) ? data.suggestions.filter(Boolean).map(String) : []
+  const formatHints = data?.formatHints && typeof data.formatHints === 'object' ? data.formatHints : {}
+
+  return {
+    enhancedInput,
+    styleHints,
+    formatHints,
+    suggestions,
+    usedFallback: false,
+    fallbackReason: ''
+  }
+}
+
+function createInputAssistantFallback(payload) {
+  const rawInput = String(payload?.rawInput || '').trim()
+  const styles = Array.isArray(payload?.selectedStyles)
+    ? [...new Set(payload.selectedStyles.map((style) => String(style).trim()).filter(Boolean))]
+    : []
+  const sections = [
+    '【改编目标】小说转脚本',
+    rawInput.length < 80
+      ? '【需求整理】请基于以下原始想法扩展为适合改编的故事素材，保持用户核心意思不变。'
+      : '【需求整理】请基于以下原始素材进行剧本改编，保留用户已写明的关键情节和限制。',
+    `【用户硬约束】\n${rawInput}`
+  ]
+
+  if (styles.length) {
+    sections.push(`【风格偏好】${styles.join('、')}。这是软建议，请在不改变核心人物、事件、结局和明确限制的前提下使用。`)
+  }
+
+  sections.push('【提交说明】请优先遵守用户硬约束；标题、章节数量、角色设定等未写明的信息可以合理补足，但不要强制改变原意。')
+
+  const suggestions = []
+  if (!/[《]|标题|题名|片名|书名|title/i.test(rawInput)) {
+    suggestions.push('可以补充作品标题')
+  }
+  if (!/主角|男主|女主|角色|人物|反派|配角|protagonist|character/i.test(rawInput)) {
+    suggestions.push('可以补充主要角色')
+  }
+  if (!/chapter|第1章|第一章|第1集|第一集|三章|3章|章节|集数/i.test(rawInput)) {
+    suggestions.push('可以指定章节数量')
+  }
+  if (!styles.length && !/风格|基调|悬疑|治愈|电影感|短剧感|轻喜剧|赛博朋克|tone|style/i.test(rawInput)) {
+    suggestions.push('可以选择或描述风格偏好')
+  }
+
+  return {
+    enhancedInput: sections.join('\n\n'),
+    styleHints: styles,
+    formatHints: {
+      contentType: '小说转脚本',
+      tone: styles.length ? styles.join('、') : '未指定'
+    },
+    suggestions: suggestions.length ? suggestions : ['当前输入已经比较清晰，可以直接提交生成'],
+    usedFallback: true,
+    fallbackReason: ''
+  }
+}
+
+function createInputAssistantChatFallback(payload) {
+  const rawInput = [
+    payload?.homeInput ? `首页已有输入：\n${payload.homeInput}` : '',
+    ...(Array.isArray(payload?.messages)
+      ? payload.messages.filter((message) => message?.role === 'user').map((message) => message.text)
+      : [])
+  ].filter(Boolean).join('\n\n')
+  const refined = createInputAssistantFallback({
+    rawInput,
+    selectedStyles: payload?.selectedStyles
+  })
+
+  return {
+    ...refined,
+    assistantMessage: payload?.capability === 'style'
+      ? '我给出轻量风格建议，并整理了一个可回填的输入草稿。'
+      : '我已整理输入格式，并生成一个可回填的清晰草稿。'
+  }
 }

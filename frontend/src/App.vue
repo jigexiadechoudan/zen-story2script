@@ -5,6 +5,7 @@ import { ApiError, convertNovel, getCurrentUser, login, logout, register } from 
 import AppHeader from './components/AppHeader.vue'
 import AuthPanel from './components/AuthPanel.vue'
 import ConversionForm from './components/ConversionForm.vue'
+import InputAssistant from './components/InputAssistant.vue'
 import ModeSelector from './components/ModeSelector.vue'
 import ProgressTimeline from './components/ProgressTimeline.vue'
 import QualityPanel from './components/QualityPanel.vue'
@@ -521,6 +522,28 @@ async function handleConvert() {
   }
 }
 
+function handleAssistantApply(payload) {
+  const enhancedInput = String(payload?.enhancedInput || '').trim()
+  if (!enhancedInput) {
+    return
+  }
+
+  form.sourceText = enhancedInput
+
+  const newStyles = Array.isArray(payload?.styleHints)
+    ? payload.styleHints.map((style) => String(style).trim()).filter(Boolean)
+    : []
+  if (newStyles.length) {
+    const currentStyles = form.styleHint
+      .split(/[、,，]/)
+      .map((style) => style.trim())
+      .filter(Boolean)
+    form.styleHint = [...new Set([...currentStyles, ...newStyles])].join('、')
+  }
+
+  actionMessage.value = '首页输入助手已回填正文输入区。'
+}
+
 async function copyYaml() {
   if (!hasYaml.value) {
     return
@@ -784,5 +807,11 @@ function sanitizeFileName(value) {
         />
       </motion.section>
     </section>
+    <InputAssistant
+      v-if="currentUser"
+      :source-text="form.sourceText"
+      :style-hint="form.styleHint"
+      @apply="handleAssistantApply"
+    />
   </main>
 </template>
