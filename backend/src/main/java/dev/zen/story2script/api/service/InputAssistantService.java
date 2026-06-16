@@ -53,7 +53,7 @@ public class InputAssistantService {
         if (chatClient != null) {
             AssistantRefineInputResponse llmResponse = refineWithLlm(rawInput, styles);
             if (llmResponse != null && !llmResponse.enhancedInput().isBlank()) {
-                return llmResponse;
+                return chapterizeRefineResponse(llmResponse, rawInput, styles);
             }
         }
 
@@ -95,13 +95,16 @@ public class InputAssistantService {
                             .build())
                     .system("""
                             你是 Zen Story2Script 首页输入助手，只负责整理用户输入，不生成剧本。
-                            目标：把用户原始需求整理成更适合提交给小说转脚本流程的 enhancedInput。
+                            目标：把用户原始正文整理成可直接粘贴到首页“小说正文”的章节正文。
                             约束：
                             1. 不触发 RAG、ReAct 或工具调用。
-                            2. 明确区分“用户硬约束”和“风格偏好/软建议”。
-                            3. 不改写用户核心意思，不删除关键人物、事件、结局和明确限制。
-                            4. 如果信息缺失，只在 suggestions 中提示，不强制补充。
-                            5. 只返回 JSON，不要 Markdown 代码块。
+                            2. enhancedInput 只能返回正文，不要返回解释、需求清单、Markdown 列表、建议或“用户硬约束”等标签。
+                            3. 必须把正文整理成至少 3 个章节，每章标题独立一行，格式必须能匹配：第一章 标题、第二章 标题、第三章 标题。
+                            4. 不改写用户核心意思，不删除关键人物、事件、结局和明确限制。
+                            5. 如果用户已经提供章节标题，可以保留并规范化为“第N章 标题”。
+                            6. 如果用户没有章节标题，请按自然段或情节点拆成三章，并基于每章内容生成简短章节标题，不扩写剧情。
+                            7. suggestions 返回空数组。
+                            8. 只返回 JSON，不要 Markdown 代码块。
                             JSON 字段：
                             enhancedInput: string
                             styleHints: string[]
@@ -382,13 +385,31 @@ public class InputAssistantService {
         String tone = styles.isEmpty() ? "未指定" : String.join("、", styles);
 
         return new AssistantRefineInputResponse(
-                buildEnhancedInput(rawInput, styles),
+                buildChapterizedInput(rawInput),
                 styles,
                 Map.of(
                         "contentType", "小说转脚本",
                         "tone", tone
                 ),
-                buildSuggestions(rawInput, styles)
+                List.of()
+        );
+    }
+
+    private AssistantRefineInputResponse chapterizeRefineResponse(
+            AssistantRefineInputResponse response,
+            String rawInput,
+            List<String> styles
+    ) {
+        String candidate = normalizeText(response.enhancedInput());
+        String chapterized = hasValidChapterCount(candidate)
+                ? normalizeChapterSpacing(candidate)
+                : buildChapterizedInput(rawInput);
+        Map<String, String> formatHints = withDefaultFormatHints(response.formatHints(), styles);
+        return new AssistantRefineInputResponse(
+                chapterized,
+                List.copyOf(styles),
+                formatHints,
+                List.of()
         );
     }
 
@@ -566,6 +587,94 @@ public class InputAssistantService {
         sections.add("【提交说明】请优先遵守用户硬约束；标题、章节数量、角色设定等未写明的信息可以合理补足，但不要强制改变原意。");
 
         return String.join("\n\n", sections);
+    }
+
+    private String buildChapterizedInput(String rawInput) {
+        String input = normalizeText(rawInput);
+        if (input.isBlank()) {
+            return "";
+        }
+        if (hasValidChapterCount(input)) {
+            return normalizeChapterSpacing(input);
+        }
+
+        List<String> parts = splitIntoChapterParts(input);
+        while (parts.size() < 3) {
+            parts.add("");
+        }
+
+        List<String> chapters = new ArrayList<>();
+        for (int index = 0; index < 3; index++) {
+            String body = parts.get(index).trim();
+            if (body.isBlank()) {
+                body = input;
+            }
+            chapters.add("%s\n\n%s".formatted(chineseChapterNumber(index + 1), body));
+        }
+        return String.join("\n\n", chapters);
+    }
+
+    private List<String> splitIntoChapterParts(String input) {
+        String[] paragraphs = input.split("\\n\\s*\\n");
+        List<String> cleaned = new ArrayList<>();
+        for (String paragraph : paragraphs) {
+            String normalized = normalizeText(paragraph);
+            if (!normalized.isBlank()) {
+                cleaned.add(normalized);
+            }
+        }
+        if (cleaned.size() >= 3) {
+            return cleaned.subList(0, 3);
+        }
+
+        List<String> sentences = new ArrayList<>();
+        for (String sentence : input.split("(?<=[。！？!?])")) {
+            String normalized = normalizeText(sentence);
+            if (!normalized.isBlank()) {
+                sentences.add(normalized);
+            }
+        }
+        if (sentences.size() < 3) {
+            return cleaned.isEmpty() ? List.of(input) : cleaned;
+        }
+
+        List<String> parts = new ArrayList<>();
+        int baseSize = (int) Math.ceil(sentences.size() / 3.0);
+        for (int start = 0; start < sentences.size() && parts.size() < 3; start += baseSize) {
+            int end = Math.min(sentences.size(), start + baseSize);
+            parts.add(String.join("", sentences.subList(start, end)).trim());
+        }
+        return parts;
+    }
+
+    private boolean hasValidChapterCount(String value) {
+        return countChapterHeadings(value) >= 3;
+    }
+
+    private int countChapterHeadings(String value) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?im)(^|\\n)\\s*(#{1,6}\\s*)?((第\\s*[一二三四五六七八九十百千万零〇两\\d]+\\s*[章节回卷])|(chapter\\s+\\d+))")
+                .matcher(value);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+        }
+        return count;
+    }
+
+    private String normalizeChapterSpacing(String value) {
+        return normalizeText(value)
+                .replaceAll("(?m)^\\s*(#{1,6}\\s*)?(第\\s*[一二三四五六七八九十百千万零〇两\\d]+\\s*[章节回卷].*)$", "$2")
+                .replaceAll("\\n{3,}", "\n\n");
+    }
+
+    private String chineseChapterNumber(int index) {
+        return switch (index) {
+            case 1 -> "第一章";
+            case 2 -> "第二章";
+            case 3 -> "第三章";
+            default -> "第" + index + "章";
+        };
     }
 
     private List<String> buildSuggestions(String rawInput, List<String> styles) {

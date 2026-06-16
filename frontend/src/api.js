@@ -556,45 +556,74 @@ function createInputAssistantFallback(payload) {
   const styles = Array.isArray(payload?.selectedStyles)
     ? [...new Set(payload.selectedStyles.map((style) => String(style).trim()).filter(Boolean))]
     : []
-  const sections = [
-    '【改编目标】小说转脚本',
-    rawInput.length < 80
-      ? '【需求整理】请基于以下原始想法扩展为适合改编的故事素材，保持用户核心意思不变。'
-      : '【需求整理】请基于以下原始素材进行剧本改编，保留用户已写明的关键情节和限制。',
-    `【用户硬约束】\n${rawInput}`
-  ]
-
-  if (styles.length) {
-    sections.push(`【风格偏好】${styles.join('、')}。这是软建议，请在不改变核心人物、事件、结局和明确限制的前提下使用。`)
-  }
-
-  sections.push('【提交说明】请优先遵守用户硬约束；标题、章节数量、角色设定等未写明的信息可以合理补足，但不要强制改变原意。')
-
-  const suggestions = []
-  if (!/[《]|标题|题名|片名|书名|title/i.test(rawInput)) {
-    suggestions.push('可以补充作品标题')
-  }
-  if (!/主角|男主|女主|角色|人物|反派|配角|protagonist|character/i.test(rawInput)) {
-    suggestions.push('可以补充主要角色')
-  }
-  if (!/chapter|第1章|第一章|第1集|第一集|三章|3章|章节|集数/i.test(rawInput)) {
-    suggestions.push('可以指定章节数量')
-  }
-  if (!styles.length && !/风格|基调|悬疑|治愈|电影感|短剧感|轻喜剧|赛博朋克|tone|style/i.test(rawInput)) {
-    suggestions.push('可以选择或描述风格偏好')
-  }
 
   return {
-    enhancedInput: sections.join('\n\n'),
+    enhancedInput: buildChapterizedInput(rawInput),
     styleHints: styles,
     formatHints: {
       contentType: '小说转脚本',
       tone: styles.length ? styles.join('、') : '未指定'
     },
-    suggestions: suggestions.length ? suggestions : ['当前输入已经比较清晰，可以直接提交生成'],
+    suggestions: [],
     usedFallback: true,
     fallbackReason: ''
   }
+}
+
+function buildChapterizedInput(rawInput) {
+  const input = String(rawInput || '').trim()
+  if (!input) {
+    return ''
+  }
+  if (countChapterHeadings(input) >= 3) {
+    return input
+      .replace(/^\s*#{1,6}\s*(第\s*[一二三四五六七八九十百千万零〇两\d]+\s*[章节回卷].*)$/gim, '$1')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+
+  const parts = splitIntoChapterParts(input)
+  while (parts.length < 3) {
+    parts.push(input)
+  }
+  return parts.slice(0, 3).map((part, index) => {
+    return `${chineseChapterNumber(index + 1)}\n\n${part.trim() || input}`
+  }).join('\n\n')
+}
+
+function splitIntoChapterParts(input) {
+  const paragraphs = input
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (paragraphs.length >= 3) {
+    return paragraphs.slice(0, 3)
+  }
+
+  const sentences = input
+    .split(/(?<=[。！？!?])/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (sentences.length < 3) {
+    return paragraphs.length ? paragraphs : [input]
+  }
+
+  const size = Math.ceil(sentences.length / 3)
+  const parts = []
+  for (let index = 0; index < sentences.length && parts.length < 3; index += size) {
+    parts.push(sentences.slice(index, index + size).join(''))
+  }
+  return parts
+}
+
+function countChapterHeadings(value) {
+  return String(value || '').match(
+    /(^|\n)\s*(#{1,6}\s*)?((第\s*[一二三四五六七八九十百千万零〇两\d]+\s*[章节回卷])|(chapter\s+\d+))/gi
+  )?.length || 0
+}
+
+function chineseChapterNumber(index) {
+  return ['第一章', '第二章', '第三章'][index - 1] || `第${index}章`
 }
 
 function createInputAssistantChatFallback(payload) {

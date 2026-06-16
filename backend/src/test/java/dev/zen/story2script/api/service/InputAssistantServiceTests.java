@@ -26,14 +26,16 @@ class InputAssistantServiceTests {
         ));
 
         assertThat(response.enhancedInput())
-                .contains("【用户硬约束】")
+                .contains("第一章")
+                .contains("第二章")
+                .contains("第三章")
                 .contains("一个女孩回到故乡调查父亲失踪")
-                .contains("【风格偏好】悬疑、电影感");
+                .doesNotContain("【用户硬约束】", "【风格偏好】");
         assertThat(response.styleHints()).containsExactly("悬疑", "电影感");
         assertThat(response.formatHints())
                 .containsEntry("contentType", "小说转脚本")
                 .containsEntry("tone", "悬疑、电影感");
-        assertThat(response.suggestions()).contains("可以补充主要角色", "可以指定章节数量");
+        assertThat(response.suggestions()).isEmpty();
     }
 
     @Test
@@ -46,7 +48,8 @@ class InputAssistantServiceTests {
 
         assertThat(response.styleHints()).containsExactly("治愈");
         assertThat(response.formatHints()).containsEntry("tone", "治愈");
-        assertThat(response.suggestions()).doesNotContain("可以补充作品标题", "可以补充主要角色");
+        assertThat(response.enhancedInput()).contains("第一章", "第二章", "第三章");
+        assertThat(response.suggestions()).isEmpty();
     }
 
     @Test
