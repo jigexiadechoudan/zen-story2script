@@ -1,13 +1,13 @@
 package dev.zen.story2script.tools;
 
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.api.Advisor;
+import org.springframework.ai.chat.model.ChatModel;
+
+import java.util.List;
 
 /**
- * 真实 LLM 适配器，使用 Spring AI ChatClient 调用模型。
- *
- * <p>只有存在 {@link ChatModel} Bean 时才创建这个实现。这样本地或测试环境
- * 即使没有配置模型，也能启动 Spring 上下文。</p>
+ * Real LLM adapter backed by Spring AI ChatClient.
  */
 public class SpringAiToolLlmClient implements ToolLlmClient {
 
@@ -19,10 +19,15 @@ public class SpringAiToolLlmClient implements ToolLlmClient {
 
     @Override
     public String generate(String systemPrompt, String userPrompt) {
-        // 工具层只负责发送 Prompt，不编排 Agent 步骤。
+        return generate(systemPrompt, userPrompt, List.of());
+    }
+
+    @Override
+    public String generate(String systemPrompt, String userPrompt, List<Advisor> advisors) {
         String content = chatClient.prompt()
                 .system(systemPrompt)
                 .user(userPrompt)
+                .advisors(advisors == null ? List.of() : advisors)
                 .call()
                 .content();
         return content == null ? "" : content.trim();

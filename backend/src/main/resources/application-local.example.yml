@@ -14,8 +14,9 @@
 #   DATABASE_USERNAME=story2script
 #   DATABASE_PASSWORD=<your-database-password>
 #   DASHSCOPE_API_KEY=<your-dashscope-api-key>
-#   STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED=false
-#   STORY2SCRIPT_RAG_SYNC_ON_STARTUP=false
+#   SPRING_AI_VECTORSTORE_TYPE=simple
+#   STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED=true
+#   STORY2SCRIPT_RAG_SYNC_ON_STARTUP=true
 #   AUTH_TOKEN_SECRET=<at-least-32-random-characters>
 #   REGISTRATION_INVITE_CODE=<your-private-invite-code>
 
@@ -28,7 +29,7 @@ spring:
   ai:
     model:
       chat: ${SPRING_AI_MODEL_CHAT:openai}
-      embedding: ${SPRING_AI_MODEL_EMBEDDING:none}
+      embedding: ${SPRING_AI_MODEL_EMBEDDING:openai}
       image: none
       moderation: none
       audio:
@@ -50,7 +51,7 @@ spring:
           dimensions: ${DASHSCOPE_EMBEDDING_DIMENSIONS:1024}
           encoding-format: float
     vectorstore:
-      type: ${SPRING_AI_VECTORSTORE_TYPE:none}
+      type: ${SPRING_AI_VECTORSTORE_TYPE:simple}
       pgvector:
         initialize-schema: ${PGVECTOR_INITIALIZE_SCHEMA:true}
         schema-name: ${PGVECTOR_SCHEMA_NAME:public}
@@ -72,7 +73,7 @@ story2script:
       enabled: true
   rag:
     vector-store-enabled: ${STORY2SCRIPT_RAG_VECTOR_STORE_ENABLED:true}
-    sync-on-startup: ${STORY2SCRIPT_RAG_SYNC_ON_STARTUP:false}
+    sync-on-startup: ${STORY2SCRIPT_RAG_SYNC_ON_STARTUP:true}
     top-k: ${STORY2SCRIPT_RAG_TOP_K:2}
     similarity-threshold: ${STORY2SCRIPT_RAG_SIMILARITY_THRESHOLD:0.0}
 

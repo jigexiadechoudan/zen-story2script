@@ -4,17 +4,17 @@ import dev.zen.story2script.schema.YamlSchemaValidationResult;
 import dev.zen.story2script.schema.YamlSchemaValidator;
 import dev.zen.story2script.tools.ChapterParseTool;
 import dev.zen.story2script.tools.ScreenplayYamlWriteTool;
+import dev.zen.story2script.tools.ScreenplayQualityReviewTool;
+import dev.zen.story2script.tools.SourceCoverageAuditTool;
 import dev.zen.story2script.tools.ToolLlmClient;
 import dev.zen.story2script.tools.YamlRepairTool;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
-import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -28,11 +28,12 @@ public class NovelToScreenplayAgent {
 
     private final ChapterParseTool chapterParseTool;
     private final ScreenplayYamlWriteTool screenplayYamlWriteTool;
+    private final SourceCoverageAuditTool sourceCoverageAuditTool;
+    private final ScreenplayQualityReviewTool screenplayQualityReviewTool;
     private final YamlSchemaValidator yamlSchemaValidator;
     private final YamlRepairTool yamlRepairTool;
+    private final ToolLlmClient toolLlmClient;
     private final boolean devFallback;
-    private final ChatClient chatClient;
-    private final ToolCallbackProvider toolCallbackProvider;
     private final List<Advisor> retrievalAdvisors;
     private final boolean autonomousEnabled;
     private final Duration autonomousTimeout;
@@ -42,11 +43,11 @@ public class NovelToScreenplayAgent {
     public NovelToScreenplayAgent(
             ChapterParseTool chapterParseTool,
             ScreenplayYamlWriteTool screenplayYamlWriteTool,
+            SourceCoverageAuditTool sourceCoverageAuditTool,
+            ScreenplayQualityReviewTool screenplayQualityReviewTool,
             YamlRepairTool yamlRepairTool,
             ToolLlmClient toolLlmClient,
-            ObjectProvider<ChatClient> chatClientProvider,
-            ObjectProvider<ToolCallbackProvider> toolCallbackProvider,
-            ObjectProvider<Advisor> advisors,
+            org.springframework.beans.factory.ObjectProvider<Advisor> advisors,
             @Value("${story2script.agent.autonomous-enabled:true}") boolean autonomousEnabled,
             @Value("${story2script.agent.autonomous-timeout:45s}") Duration autonomousTimeout,
             @Value("${story2script.agent.max-input-chars:12000}") int maxInputChars
@@ -54,11 +55,12 @@ public class NovelToScreenplayAgent {
         this(
                 chapterParseTool,
                 screenplayYamlWriteTool,
+                sourceCoverageAuditTool,
+                screenplayQualityReviewTool,
                 new YamlSchemaValidator(),
                 yamlRepairTool,
+                toolLlmClient,
                 toolLlmClient.devFallback(),
-                chatClientProvider.getIfAvailable(),
-                toolCallbackProvider.getIfAvailable(),
                 advisors.orderedStream().toList(),
                 autonomousEnabled,
                 autonomousTimeout,
@@ -71,16 +73,18 @@ public class NovelToScreenplayAgent {
             ScreenplayYamlWriteTool screenplayYamlWriteTool,
             YamlSchemaValidator yamlSchemaValidator,
             YamlRepairTool yamlRepairTool,
+            ToolLlmClient toolLlmClient,
             boolean devFallback
     ) {
         this(
                 chapterParseTool,
                 screenplayYamlWriteTool,
+                new SourceCoverageAuditTool(),
+                new ScreenplayQualityReviewTool(),
                 yamlSchemaValidator,
                 yamlRepairTool,
+                toolLlmClient,
                 devFallback,
-                null,
-                null,
                 List.of(),
                 false,
                 Duration.ofSeconds(45),
@@ -91,11 +95,12 @@ public class NovelToScreenplayAgent {
     NovelToScreenplayAgent(
             ChapterParseTool chapterParseTool,
             ScreenplayYamlWriteTool screenplayYamlWriteTool,
+            SourceCoverageAuditTool sourceCoverageAuditTool,
+            ScreenplayQualityReviewTool screenplayQualityReviewTool,
             YamlSchemaValidator yamlSchemaValidator,
             YamlRepairTool yamlRepairTool,
+            ToolLlmClient toolLlmClient,
             boolean devFallback,
-            ChatClient chatClient,
-            ToolCallbackProvider toolCallbackProvider,
             List<Advisor> retrievalAdvisors,
             boolean autonomousEnabled,
             Duration autonomousTimeout,
@@ -109,11 +114,12 @@ public class NovelToScreenplayAgent {
         }
         this.chapterParseTool = chapterParseTool;
         this.screenplayYamlWriteTool = screenplayYamlWriteTool;
+        this.sourceCoverageAuditTool = sourceCoverageAuditTool;
+        this.screenplayQualityReviewTool = screenplayQualityReviewTool;
         this.yamlSchemaValidator = yamlSchemaValidator;
         this.yamlRepairTool = yamlRepairTool;
+        this.toolLlmClient = toolLlmClient;
         this.devFallback = devFallback;
-        this.chatClient = chatClient;
-        this.toolCallbackProvider = toolCallbackProvider;
         this.retrievalAdvisors = List.copyOf(retrievalAdvisors == null ? List.of() : retrievalAdvisors);
         this.autonomousEnabled = autonomousEnabled;
         this.autonomousTimeout = autonomousTimeout;
@@ -144,50 +150,47 @@ public class NovelToScreenplayAgent {
 
     private boolean canUseAutonomousReActDependencies() {
         return autonomousEnabled
-                && chatClient != null
-                && toolCallbackProvider != null
                 && !devFallback;
     }
 
     private AgentResult convertAutonomouslyWithFallback(AgentContext context, AgentProgressListener progressListener) {
-        CompletableFuture<AgentResult> autonomousRun = CompletableFuture.supplyAsync(
-                () -> convertAutonomously(context, progressListener)
+        AgentResult autonomousResult = convertAutonomously(context, progressListener);
+        if (autonomousResult.qualityReport().success()) {
+            return autonomousResult;
+        }
+        return convertFastAfterAutonomousFailure(
+                context,
+                progressListener,
+                "AUTONOMOUS_REACT_UNUSABLE",
+                autonomousResult.qualityReport().message()
+        );
+    }
+
+    private String runBoundedThinkCall(String systemPrompt, String userPrompt) {
+        CompletableFuture<String> think = CompletableFuture.supplyAsync(
+                () -> toolLlmClient.generate(systemPrompt, userPrompt, retrievalAdvisors)
         );
         try {
-            AgentResult autonomousResult = autonomousRun.get(autonomousTimeout.toMillis(), TimeUnit.MILLISECONDS);
-            if (autonomousResult.qualityReport().success()) {
-                return autonomousResult;
-            }
-            return convertFastAfterAutonomousFailure(
-                    context,
-                    progressListener,
-                    "AUTONOMOUS_REACT_UNUSABLE",
-                    autonomousResult.qualityReport().message()
-            );
+            return think.get(autonomousTimeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException ex) {
-            autonomousRun.cancel(true);
-            return convertFastAfterAutonomousFailure(
-                    context,
-                    progressListener,
-                    "AUTONOMOUS_REACT_TIMEOUT",
-                    "Autonomous ReAct timed out after %s.".formatted(autonomousTimeout)
-            );
+            think.cancel(true);
+            throw new ReactThinkTimeoutException("ReAct think timed out after %s.".formatted(autonomousTimeout));
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            return convertFastAfterAutonomousFailure(
-                    context,
-                    progressListener,
-                    "AUTONOMOUS_REACT_INTERRUPTED",
-                    ex.getMessage()
-            );
+            throw new ReactThinkTimeoutException("ReAct think was interrupted: " + nullToEmpty(ex.getMessage()));
         } catch (java.util.concurrent.ExecutionException ex) {
-            return convertFastAfterAutonomousFailure(
-                    context,
-                    progressListener,
-                    "AUTONOMOUS_REACT_FAILED",
-                    ex.getMessage()
-            );
+            throw new ReactThinkTimeoutException("ReAct think failed: " + nullToEmpty(ex.getMessage()));
         }
+    }
+
+    private String finishDecisionAfterThinkFailure(AgentState state, ReactPhase phase, RuntimeException ex) {
+        String message = "%s; continuing fixed conversion chain without optional %s tool."
+                .formatted(nullToEmpty(ex.getMessage()), phase.displayName());
+        state.warn(message);
+        state.addCheck("react_think_timeout_" + phase.checkName());
+        return """
+                {"thought":"bounded ReAct think failed within timeout","action":"finish","repair_hint":""}
+                """;
     }
 
     private AgentResult convertFastAfterAutonomousFailure(
@@ -197,6 +200,7 @@ public class NovelToScreenplayAgent {
             String reason
     ) {
         AgentState fallbackState = new AgentState(context);
+        fallbackState.setTraceMode("react_fallback_fast");
         fallbackState.warn(warning);
         fallbackState.warn("Autonomous ReAct could not produce a usable result; fell back to fast mode: "
                 + nullToEmpty(reason));
@@ -215,108 +219,218 @@ public class NovelToScreenplayAgent {
     private AgentResult convertAutonomously(AgentContext context, AgentProgressListener progressListener) {
         AgentProgressListener listener = progressListener == null ? AgentProgressListener.NOOP : progressListener;
         AgentState state = new AgentState(context);
-        state.addCheck("llm_autonomous_tool_calling");
+        state.setTraceMode("react");
+        state.addCheck("bounded_react");
         state.addCheck("autonomousTimeout=%s".formatted(autonomousTimeout));
         state.addCheck("maxInputChars=%d".formatted(maxInputChars));
+        if (!retrievalAdvisors.isEmpty()) {
+            state.addCheck("rag_advisor_attached");
+        }
 
         try {
-            state.recordTrace("llm_agent", "Started LLM-driven tool selection.");
+            parseChapters(state);
             state.lastTraceStep().ifPresent(listener::onStep);
-            String yaml = chatClient.prompt()
-                    .system(autonomousSystemPrompt())
-                    .user(autonomousUserPrompt(context))
-                    .toolCallbacks(toolCallbackProvider)
-                    .advisors(retrievalAdvisors)
-                    .call()
-                    .content();
+            if (state.chapterParseFailed()) {
+                return finish(state);
+            }
 
-            state.recordToolCall("llm_final_answer", "Received final YAML from LLM autonomous agent.");
+            String preObservation = runReactDecision(
+                    state,
+                    listener,
+                    ReactPhase.BEFORE_WRITE,
+                    ""
+            );
+
+            writeFastYaml(state, retrievalAdvisors, preObservation);
             state.lastTraceStep().ifPresent(listener::onStep);
-            state.observeYamlWrite(yaml == null ? "" : yaml.trim());
 
             validateYaml(state);
             state.lastTraceStep().ifPresent(listener::onStep);
-            if (!state.yamlValid()) {
-                return failureResult(
-                        state.yaml(),
-                        "YAML_VALIDATION_FAILED",
-                        "LLM autonomous agent returned YAML that failed schema validation.",
-                        state,
-                        validationIssues(state.validationResult())
-                );
+
+            String postObservation = runReactDecision(
+                    state,
+                    listener,
+                    ReactPhase.AFTER_WRITE,
+                    preObservation
+            );
+            if (!state.yamlValid() && state.canRepairYaml()) {
+                repairYaml(state, retrievalAdvisors, postObservation);
+                state.lastTraceStep().ifPresent(listener::onStep);
+                validateYaml(state);
+                state.lastTraceStep().ifPresent(listener::onStep);
+            } else if (shouldRepairAfterReactObservation(postObservation) && state.canRepairDraft()) {
+                repairYaml(state, retrievalAdvisors, postObservation);
+                state.lastTraceStep().ifPresent(listener::onStep);
+                validateYaml(state);
+                state.lastTraceStep().ifPresent(listener::onStep);
             }
-            return successResult(state);
+            return finish(state);
         } catch (IllegalArgumentException ex) {
             state.warn(ex.getMessage());
             return failureResult("", "AGENT_INPUT_INVALID", ex.getMessage(), state, List.of());
         } catch (RuntimeException ex) {
-            String message = "LLM autonomous agent execution failed: " + ex.getMessage();
+            String message = "Bounded ReAct conversion failed: " + ex.getMessage();
             state.warn(message);
             return failureResult("", "AGENT_TOOL_FAILED", message, state, List.of());
         }
     }
 
-    private String autonomousSystemPrompt() {
-        return """
-                You are an autonomous ReAct-style novel-to-screenplay agent.
-                You may decide whether and when to call the available tools.
+    private String runReactDecision(
+            AgentState state,
+            AgentProgressListener listener,
+            ReactPhase phase,
+            String previousObservation
+    ) {
+        String decision = boundedReactThink(state, phase, previousObservation);
+        state.recordTrace("react_think", decisionSummary(phase, decision));
+        state.lastTraceStep().ifPresent(listener::onStep);
+        state.addCheck("react_think_" + phase.checkName());
 
-                Available tool responsibilities:
-                - chapter_parse: parse and validate source chapters.
-                - story_analysis: extract characters, events, and conflicts.
-                - scene_planning: turn story analysis into scenes.
-                - yaml_write: write the screenplay YAML draft.
-                - yaml_validation: validate the screenplay YAML against the required schema.
-                - yaml_repair: repair YAML after validation errors if needed.
-
-                Use tools when they help produce a valid screenplay YAML document. Do not expose tool JSON,
-                scratchpad notes, Markdown fences, or commentary in the final answer.
-                The final YAML must be a playable screenplay draft: each scene needs a location, time of day,
-                present characters, concrete action beats, and dialogue beats with speakers.
-                All natural-language YAML values must be written in the requested output language. Keep YAML keys
-                and enum values in the schema language exactly as specified.
-                Do not return only a synopsis, treatment, scene outline, or abstract beat sheet.
-                The final answer must be only YAML matching schema_version "1.0".
-                """;
+        ReactAction action = ReactAction.fromDecision(decision, phase);
+        return switch (action) {
+            case SOURCE_COVERAGE_AUDIT -> runSourceCoverageAudit(state, listener);
+            case SCREENPLAY_QUALITY_REVIEW -> runScreenplayQualityReview(state, listener);
+            case FINISH -> {
+                state.recordTrace("react_finish", "Model decided no optional audit tool was needed for %s."
+                        .formatted(phase.displayName()));
+                state.lastTraceStep().ifPresent(listener::onStep);
+                yield "";
+            }
+        };
     }
 
-    private String autonomousUserPrompt(AgentContext context) {
-        return """
-                Convert this novel excerpt into screenplay YAML.
+    private String boundedReactThink(AgentState state, ReactPhase phase, String previousObservation) {
+        try {
+            return runBoundedThinkCall(
+                    boundedReactSystemPrompt(phase),
+                    boundedReactUserPrompt(state, phase, previousObservation)
+            );
+        } catch (ReactThinkTimeoutException ex) {
+            return finishDecisionAfterThinkFailure(state, phase, ex);
+        }
+    }
 
+    private String runSourceCoverageAudit(AgentState state, AgentProgressListener listener) {
+        state.recordToolCall("source_coverage_audit", "Audited source chapter coverage.");
+        SourceCoverageAuditTool.SourceCoverageAuditOutput output = sourceCoverageAuditTool.audit(
+                new SourceCoverageAuditTool.SourceCoverageAuditInput(
+                        state.context().title(),
+                        state.chapterParseOutput().chapters(),
+                        state.yaml()
+                )
+        );
+        state.addCheck("source_coverage_audit");
+        String observation = formatObservation("source_coverage_audit", output.pass(), output.summary(), output.findings());
+        state.replaceLastTraceSummary(observation);
+        state.lastTraceStep().ifPresent(listener::onStep);
+        return observation;
+    }
+
+    private String runScreenplayQualityReview(AgentState state, AgentProgressListener listener) {
+        if (state.yaml().isBlank()) {
+            return runSourceCoverageAudit(state, listener);
+        }
+        state.recordToolCall("screenplay_quality_review", "Reviewed draft performability.");
+        ScreenplayQualityReviewTool.ScreenplayQualityReviewOutput output = screenplayQualityReviewTool.review(
+                new ScreenplayQualityReviewTool.ScreenplayQualityReviewInput(state.context().title(), state.yaml())
+        );
+        state.addCheck("screenplay_quality_review");
+        String observation = formatObservation("screenplay_quality_review", output.pass(), output.summary(), output.findings());
+        state.replaceLastTraceSummary(observation);
+        state.lastTraceStep().ifPresent(listener::onStep);
+        return observation;
+    }
+
+    private boolean shouldRepairAfterReactObservation(String observation) {
+        return observation != null
+                && !observation.isBlank()
+                && observation.contains("pass=false");
+    }
+
+    private String formatObservation(String tool, boolean pass, String summary, List<String> findings) {
+        return "%s pass=%s; %s; findings=%s".formatted(
+                tool,
+                pass,
+                nullToEmpty(summary),
+                findings == null ? List.of() : findings
+        );
+    }
+
+    private String decisionSummary(ReactPhase phase, String decision) {
+        return "ReAct %s decision: %s".formatted(phase.displayName(), compact(decision, 180));
+    }
+
+    private String boundedReactSystemPrompt(ReactPhase phase) {
+        return """
+                You are a bounded ReAct controller for a novel-to-screenplay converter.
+                The main conversion chain is fixed by the application. Your only job is to think, then choose
+                exactly one optional action for the %s phase.
+
+                Available actions:
+                - source_coverage_audit: check whether the source chapters are likely covered.
+                - screenplay_quality_review: check whether the draft is performable and scene-level.
+                - finish: skip optional tool use when no tool is useful.
+
+                Return one compact JSON object only:
+                {"thought":"short reason","action":"source_coverage_audit|screenplay_quality_review|finish","repair_hint":"short optional hint"}
+                Do not return Markdown fences or additional commentary.
+                """.formatted(phase.displayName());
+    }
+
+    private String boundedReactUserPrompt(AgentState state, ReactPhase phase, String previousObservation) {
+        return """
+                Phase: %s
                 Title: %s
                 Author: %s
                 Language: %s
                 Target format: %s
                 Target duration: %s
                 Style hint: %s
-                Input limit: source text is capped at %d characters for autonomous ReAct.
+                Parsed chapter count: %d
+                Previous observation: %s
+                Draft YAML available: %s
+                Draft validation: %s
 
-                Source text:
+                Parsed chapters:
                 %s
                 """.formatted(
-                context.title(),
-                nullToEmpty(context.originalAuthor()),
-                nullToEmpty(context.language()),
-                context.targetFormat(),
-                nullToEmpty(context.targetDuration()),
-                nullToEmpty(context.styleHint()),
-                maxInputChars,
-                limitedSourceText(context.sourceText())
+                phase.displayName(),
+                state.context().title(),
+                nullToEmpty(state.context().originalAuthor()),
+                nullToEmpty(state.context().language()),
+                state.context().targetFormat(),
+                nullToEmpty(state.context().targetDuration()),
+                nullToEmpty(state.context().styleHint()),
+                state.chapterParseOutput() == null ? 0 : state.chapterParseOutput().chapters().size(),
+                nullToEmpty(previousObservation),
+                !state.yaml().isBlank(),
+                state.validationResult() == null ? "not_validated" : state.validationResult().valid(),
+                compact(formatChapters(state.chapterParseOutput().chapters()), maxInputChars)
         );
     }
 
-    private String limitedSourceText(String sourceText) {
-        if (sourceText.length() <= maxInputChars) {
-            return sourceText;
+    private String compact(String value, int limit) {
+        if (value == null || value.length() <= limit) {
+            return nullToEmpty(value);
         }
-        return sourceText.substring(0, maxInputChars)
-                + "\n\n[TRUNCATED: autonomous ReAct input capped at %d characters. Use fast mode or split chapters for full text.]"
-                .formatted(maxInputChars);
+        return value.substring(0, limit) + "\n[TRUNCATED]";
+    }
+
+    private String formatChapters(List<ChapterParseTool.ParsedChapter> chapters) {
+        StringBuilder builder = new StringBuilder();
+        for (ChapterParseTool.ParsedChapter chapter : chapters) {
+            builder.append("[").append(chapter.index()).append("] ")
+                    .append(chapter.heading()).append('\n')
+                    .append(chapter.content()).append("\n\n");
+        }
+        return builder.toString().trim();
     }
 
     private AgentResult convertFast(AgentState state, AgentProgressListener listener) {
         try {
+            if (!state.hasTraceMode()) {
+                state.setTraceMode("fast");
+            }
             state.addCheck("fast_mode");
             parseChapters(state);
             state.lastTraceStep().ifPresent(listener::onStep);
@@ -359,6 +473,10 @@ public class NovelToScreenplayAgent {
     }
 
     private void writeFastYaml(AgentState state) {
+        writeFastYaml(state, List.of(), "");
+    }
+
+    private void writeFastYaml(AgentState state, List<Advisor> advisors, String reactObservation) {
         state.recordToolCall(AgentAction.WRITE_YAML.traceName(), "Generated compact screenplay YAML draft in fast mode.");
         ScreenplayYamlWriteTool.ScreenplayYamlWriteOutput output = screenplayYamlWriteTool.writeFast(
                 new ScreenplayYamlWriteTool.FastScreenplayYamlWriteInput(
@@ -367,9 +485,10 @@ public class NovelToScreenplayAgent {
                         state.context().language(),
                         state.context().targetFormat(),
                         state.context().targetDuration(),
-                        state.context().styleHint(),
+                        appendReactObservation(state.context().styleHint(), reactObservation),
                         state.chapterParseOutput().chapters()
-                )
+                ),
+                advisors
         );
         state.observeYamlWrite(output.yaml());
         if (devFallback) {
@@ -388,12 +507,42 @@ public class NovelToScreenplayAgent {
     }
 
     private void repairYaml(AgentState state) {
-        state.warn("YAML validation failed; attempting one repair.");
+        repairYaml(state, List.of(), "", "YAML validation failed; attempting one repair.");
+    }
+
+    private void repairYaml(AgentState state, List<Advisor> advisors, String guidance) {
+        repairYaml(state, advisors, guidance, repairWarning(state, guidance));
+    }
+
+    private void repairYaml(AgentState state, List<Advisor> advisors, String guidance, String warning) {
+        state.warn(warning);
         state.recordToolCall(AgentAction.REPAIR_YAML.traceName(), "Repaired screenplay YAML after validation failure.");
         YamlRepairTool.YamlRepairOutput output = yamlRepairTool.repair(
-                new YamlRepairTool.YamlRepairInput(state.yaml(), state.validationResult().errors())
+                new YamlRepairTool.YamlRepairInput(
+                        state.yaml(),
+                        state.validationResult() == null ? List.of() : state.validationResult().errors(),
+                        guidance
+                ),
+                advisors
         );
         state.observeYamlRepair(output.yaml());
+    }
+
+    private String repairWarning(AgentState state, String guidance) {
+        if (state.validationResult() != null && !state.validationResult().valid()) {
+            return "YAML validation failed; attempting one repair.";
+        }
+        if (guidance != null && !guidance.isBlank()) {
+            return "Bounded ReAct review found draft issues; attempting one guided repair.";
+        }
+        return "Attempting one YAML repair.";
+    }
+
+    private String appendReactObservation(String styleHint, String reactObservation) {
+        if (reactObservation == null || reactObservation.isBlank()) {
+            return styleHint;
+        }
+        return (nullToEmpty(styleHint) + "\nBounded ReAct observation: " + reactObservation).trim();
     }
 
     private AgentResult finish(AgentState state) {
@@ -489,6 +638,47 @@ public class NovelToScreenplayAgent {
         return value == null ? "" : value;
     }
 
+    private enum ReactPhase {
+        BEFORE_WRITE("before_write", "before write"),
+        AFTER_WRITE("after_write", "after write");
+
+        private final String checkName;
+        private final String displayName;
+
+        ReactPhase(String checkName, String displayName) {
+            this.checkName = checkName;
+            this.displayName = displayName;
+        }
+
+        private String checkName() {
+            return checkName;
+        }
+
+        private String displayName() {
+            return displayName;
+        }
+    }
+
+    private enum ReactAction {
+        SOURCE_COVERAGE_AUDIT,
+        SCREENPLAY_QUALITY_REVIEW,
+        FINISH;
+
+        private static ReactAction fromDecision(String decision, ReactPhase phase) {
+            String normalized = decision == null ? "" : decision.toLowerCase();
+            if (normalized.contains("screenplay_quality_review") && phase == ReactPhase.AFTER_WRITE) {
+                return SCREENPLAY_QUALITY_REVIEW;
+            }
+            if (normalized.contains("source_coverage_audit")) {
+                return SOURCE_COVERAGE_AUDIT;
+            }
+            if (phase == ReactPhase.BEFORE_WRITE && !normalized.contains("finish")) {
+                return SOURCE_COVERAGE_AUDIT;
+            }
+            return FINISH;
+        }
+    }
+
     private AgentResult successResult(AgentState state) {
         return new AgentResult(
                 state.yaml(),
@@ -527,5 +717,11 @@ public class NovelToScreenplayAgent {
         return validationResult.errors().stream()
                 .map(AgentResult.ValidationIssue::from)
                 .toList();
+    }
+
+    private static final class ReactThinkTimeoutException extends RuntimeException {
+        private ReactThinkTimeoutException(String message) {
+            super(message);
+        }
     }
 }

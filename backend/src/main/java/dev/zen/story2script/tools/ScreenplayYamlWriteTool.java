@@ -2,9 +2,13 @@ package dev.zen.story2script.tools;
 
 import dev.zen.story2script.rag.RagKnowledgeService;
 import dev.zen.story2script.schema.ScreenplayYamlSchema;
+import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 /**
  * 剧本 YAML 草稿生成工具，使用 LLM 把分析结果和分场计划写成 YAML。
@@ -15,16 +19,24 @@ import org.springframework.stereotype.Component;
 @Component
 public class ScreenplayYamlWriteTool {
 
-    private final ToolLlmClient llmClient;
+    private final ObjectProvider<ToolLlmClient> llmClientProvider;
     private final RagKnowledgeService ragKnowledgeService;
 
     public ScreenplayYamlWriteTool(ToolLlmClient llmClient) {
-        this(llmClient, RagKnowledgeService.DISABLED);
+        this(new StaticToolLlmClientProvider(llmClient));
+    }
+
+    public ScreenplayYamlWriteTool(ToolLlmClient llmClient, RagKnowledgeService ragKnowledgeService) {
+        this(new StaticToolLlmClientProvider(llmClient), ragKnowledgeService);
+    }
+
+    public ScreenplayYamlWriteTool(ObjectProvider<ToolLlmClient> llmClientProvider) {
+        this(llmClientProvider, RagKnowledgeService.DISABLED);
     }
 
     @Autowired
-    public ScreenplayYamlWriteTool(ToolLlmClient llmClient, RagKnowledgeService ragKnowledgeService) {
-        this.llmClient = llmClient;
+    public ScreenplayYamlWriteTool(ObjectProvider<ToolLlmClient> llmClientProvider, RagKnowledgeService ragKnowledgeService) {
+        this.llmClientProvider = llmClientProvider;
         this.ragKnowledgeService = ragKnowledgeService == null ? RagKnowledgeService.DISABLED : ragKnowledgeService;
     }
 
@@ -36,12 +48,16 @@ public class ScreenplayYamlWriteTool {
      */
     @Tool(description = "Write a screenplay YAML draft from story analysis and scene plan.")
     public ScreenplayYamlWriteOutput write(ScreenplayYamlWriteInput input) {
+        return write(input, List.of());
+    }
+
+    public ScreenplayYamlWriteOutput write(ScreenplayYamlWriteInput input, List<Advisor> advisors) {
         input = ToolInputs.requireInput(input);
         ToolInputs.requireText(input.title(), "title");
         ToolInputs.requireText(input.analysisJson(), "analysisJson");
         ToolInputs.requireText(input.scenePlanJson(), "scenePlanJson");
 
-        return new ScreenplayYamlWriteOutput(llmClient.generate(systemPrompt(), userPrompt(input)));
+        return new ScreenplayYamlWriteOutput(llmClient().generate(systemPrompt(), userPrompt(input), advisors));
     }
 
     /**
@@ -51,13 +67,21 @@ public class ScreenplayYamlWriteTool {
      * {@link #write(ScreenplayYamlWriteInput)} 所使用的多步流程中。</p>
      */
     public ScreenplayYamlWriteOutput writeFast(FastScreenplayYamlWriteInput input) {
+        return writeFast(input, List.of());
+    }
+
+    public ScreenplayYamlWriteOutput writeFast(FastScreenplayYamlWriteInput input, List<Advisor> advisors) {
         input = ToolInputs.requireInput(input);
         ToolInputs.requireText(input.title(), "title");
         if (input.chapters() == null || input.chapters().isEmpty()) {
             throw new IllegalArgumentException("chapters must not be empty");
         }
 
-        return new ScreenplayYamlWriteOutput(llmClient.generate(fastSystemPrompt(), fastUserPrompt(input)));
+        return new ScreenplayYamlWriteOutput(llmClient().generate(fastSystemPrompt(), fastUserPrompt(input), advisors));
+    }
+
+    private ToolLlmClient llmClient() {
+        return llmClientProvider.getObject();
     }
 
     private String systemPrompt() {

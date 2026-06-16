@@ -3,6 +3,7 @@ package dev.zen.story2script.tools;
 import dev.zen.story2script.rag.RagKnowledgeService;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
@@ -13,16 +14,24 @@ import org.springframework.stereotype.Component;
 @Component
 public class ScenePlanningTool {
 
-    private final ToolLlmClient llmClient;
+    private final ObjectProvider<ToolLlmClient> llmClientProvider;
     private final RagKnowledgeService ragKnowledgeService;
 
     public ScenePlanningTool(ToolLlmClient llmClient) {
-        this(llmClient, RagKnowledgeService.DISABLED);
+        this(new StaticToolLlmClientProvider(llmClient));
+    }
+
+    public ScenePlanningTool(ObjectProvider<ToolLlmClient> llmClientProvider) {
+        this(llmClientProvider, RagKnowledgeService.DISABLED);
+    }
+
+    public ScenePlanningTool(ToolLlmClient llmClient, RagKnowledgeService ragKnowledgeService) {
+        this(new StaticToolLlmClientProvider(llmClient), ragKnowledgeService);
     }
 
     @Autowired
-    public ScenePlanningTool(ToolLlmClient llmClient, RagKnowledgeService ragKnowledgeService) {
-        this.llmClient = llmClient;
+    public ScenePlanningTool(ObjectProvider<ToolLlmClient> llmClientProvider, RagKnowledgeService ragKnowledgeService) {
+        this.llmClientProvider = llmClientProvider;
         this.ragKnowledgeService = ragKnowledgeService == null ? RagKnowledgeService.DISABLED : ragKnowledgeService;
     }
 
@@ -37,7 +46,11 @@ public class ScenePlanningTool {
         ToolInputs.requireText(input.title(), "title");
         ToolInputs.requireText(input.analysisJson(), "analysisJson");
 
-        return new ScenePlanningOutput(llmClient.generate(systemPrompt(), userPrompt(input)));
+        return new ScenePlanningOutput(llmClient().generate(systemPrompt(), userPrompt(input)));
+    }
+
+    private ToolLlmClient llmClient() {
+        return llmClientProvider.getObject();
     }
 
     private String systemPrompt() {

@@ -9,6 +9,7 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.ClassUtils;
 
@@ -27,6 +28,7 @@ public class AgentToolConfiguration {
     /**
      * Exposes a single provider for agent tools discovered from Spring beans.
      */
+    @Bean(name = "agentToolCallbackProvider")
     @ConditionalOnMissingBean(name = "agentToolCallbackProvider")
     ToolCallbackProvider agentToolCallbackProvider(ListableBeanFactory beanFactory) {
         Object[] toolBeans = Arrays.stream(beanFactory.getBeanNamesForType(Object.class))

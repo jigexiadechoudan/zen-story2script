@@ -16,6 +16,7 @@ final class AgentState {
     private final List<String> checks = new ArrayList<>();
     private final List<String> warnings = new ArrayList<>();
     private final List<AgentResult.Step> traceSteps = new ArrayList<>();
+    private String traceMode;
 
     private ChapterParseTool.ChapterParseOutput chapterParseOutput;
     private String yaml;
@@ -71,6 +72,10 @@ final class AgentState {
         return validationResult != null && !validationResult.valid() && repairAttempts == 0;
     }
 
+    boolean canRepairDraft() {
+        return !yaml().isBlank() && repairAttempts == 0;
+    }
+
     void observeChapterParse(ChapterParseTool.ChapterParseOutput output) {
         chapterParseOutput = output;
         checks.add("chapter_parse");
@@ -102,6 +107,16 @@ final class AgentState {
         checks.add(check);
     }
 
+    void setTraceMode(String traceMode) {
+        if (traceMode != null && !traceMode.isBlank()) {
+            this.traceMode = traceMode;
+        }
+    }
+
+    boolean hasTraceMode() {
+        return traceMode != null && !traceMode.isBlank();
+    }
+
     void recordToolCall(String tool, String summary) {
         toolCalls++;
         recordTrace(tool, summary);
@@ -127,6 +142,6 @@ final class AgentState {
     }
 
     AgentResult.AgentTrace trace() {
-        return new AgentResult.AgentTrace("react", traceSteps, toolCalls);
+        return new AgentResult.AgentTrace(traceMode == null ? "fast" : traceMode, traceSteps, toolCalls);
     }
 }

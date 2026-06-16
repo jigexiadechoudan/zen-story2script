@@ -2,35 +2,45 @@ package dev.zen.story2script.tools;
 
 import dev.zen.story2script.schema.ScreenplayYamlSchema;
 import dev.zen.story2script.schema.YamlSchemaValidationError;
+import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 /**
- * YAML 修复工具，使用 LLM 修复 YAML 语法或剧本 schema 格式问题。
- *
- * <p>这个类会把校验器返回的错误列表作为修复指导，但自身不重新执行校验。
- * 重试次数、再次校验和流程编排都由调用方或 Agent 决定。</p>
+ * Repairs YAML syntax and screenplay schema formatting issues with an LLM.
  */
 @Component
 public class YamlRepairTool {
 
-    private final ToolLlmClient llmClient;
+    private final ObjectProvider<ToolLlmClient> llmClientProvider;
 
     public YamlRepairTool(ToolLlmClient llmClient) {
-        this.llmClient = llmClient;
+        this(new StaticToolLlmClientProvider(llmClient));
     }
 
-    /**
-     * 修复一段 YAML，并要求模型只返回修复后的 YAML 文本。
-     */
+    @Autowired
+    public YamlRepairTool(ObjectProvider<ToolLlmClient> llmClientProvider) {
+        this.llmClientProvider = llmClientProvider;
+    }
+
     @Tool(description = "Repair screenplay YAML syntax or schema formatting errors.")
     public YamlRepairOutput repair(YamlRepairInput input) {
+        return repair(input, List.of());
+    }
+
+    public YamlRepairOutput repair(YamlRepairInput input, List<Advisor> advisors) {
         input = ToolInputs.requireInput(input);
         ToolInputs.requireText(input.yaml(), "yaml");
 
-        return new YamlRepairOutput(llmClient.generate(systemPrompt(), userPrompt(input)));
+        return new YamlRepairOutput(llmClient().generate(systemPrompt(), userPrompt(input), advisors));
+    }
+
+    private ToolLlmClient llmClient() {
+        return llmClientProvider.getObject();
     }
 
     private String systemPrompt() {
@@ -60,14 +70,16 @@ public class YamlRepairTool {
                 Validation errors:
                 %s
 
+                Additional repair guidance:
+                %s
+
                 YAML to repair:
                 %s
-                """.formatted(formatErrors(input.errors()), input.yaml());
+                """.formatted(formatErrors(input.errors()), ToolInputs.nullToEmpty(input.guidance()), input.yaml());
     }
 
     private String formatErrors(List<YamlSchemaValidationError> errors) {
         if (errors == null || errors.isEmpty()) {
-            // 没有结构化错误时，仍允许做纯 YAML 语法/格式修复。
             return "No structured validation errors were provided. Repair obvious YAML syntax and formatting issues only.";
         }
 
@@ -81,18 +93,17 @@ public class YamlRepairTool {
         return builder.toString().trim();
     }
 
-    public record YamlRepairInput(String yaml, List<YamlSchemaValidationError> errors) {
-        /**
-         * errors 为 null 表示没有结构化错误，不表示输入对象非法。
-         */
+    public record YamlRepairInput(String yaml, List<YamlSchemaValidationError> errors, String guidance) {
+        public YamlRepairInput(String yaml, List<YamlSchemaValidationError> errors) {
+            this(yaml, errors, "");
+        }
+
         public YamlRepairInput {
             errors = List.copyOf(errors == null ? List.of() : errors);
+            guidance = guidance == null ? "" : guidance;
         }
     }
 
-    /**
-     * 输出：模型返回的原始修复后 YAML 文本。
-     */
     public record YamlRepairOutput(String yaml) {
     }
 }

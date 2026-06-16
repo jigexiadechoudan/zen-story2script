@@ -1,6 +1,8 @@
 package dev.zen.story2script.tools;
 
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -14,10 +16,15 @@ import java.util.List;
 @Component
 public class StoryAnalysisTool {
 
-    private final ToolLlmClient llmClient;
+    private final ObjectProvider<ToolLlmClient> llmClientProvider;
 
     public StoryAnalysisTool(ToolLlmClient llmClient) {
-        this.llmClient = llmClient;
+        this(provider(llmClient));
+    }
+
+    @Autowired
+    public StoryAnalysisTool(ObjectProvider<ToolLlmClient> llmClientProvider) {
+        this.llmClientProvider = llmClientProvider;
     }
 
     /**
@@ -34,7 +41,15 @@ public class StoryAnalysisTool {
             throw new IllegalArgumentException("chapters must not be empty");
         }
 
-        return new StoryAnalysisOutput(llmClient.generate(systemPrompt(), userPrompt(input)));
+        return new StoryAnalysisOutput(llmClient().generate(systemPrompt(), userPrompt(input)));
+    }
+
+    private ToolLlmClient llmClient() {
+        return llmClientProvider.getObject();
+    }
+
+    private static ObjectProvider<ToolLlmClient> provider(ToolLlmClient llmClient) {
+        return new StaticToolLlmClientProvider(llmClient);
     }
 
     private String systemPrompt() {

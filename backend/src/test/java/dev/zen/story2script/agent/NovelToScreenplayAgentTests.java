@@ -4,10 +4,15 @@ import dev.zen.story2script.schema.YamlSchemaValidator;
 import dev.zen.story2script.config.DevFallbackToolLlmClientConfiguration;
 import dev.zen.story2script.tools.ChapterParseTool;
 import dev.zen.story2script.tools.ScreenplayYamlWriteTool;
+import dev.zen.story2script.tools.ScreenplayQualityReviewTool;
+import dev.zen.story2script.tools.SourceCoverageAuditTool;
 import dev.zen.story2script.tools.ToolLlmClient;
 import dev.zen.story2script.tools.YamlRepairTool;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.advisor.api.Advisor;
+import org.springframework.beans.factory.ObjectProvider;
 
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,9 +23,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NovelToScreenplayAgentTests {
 
     @Test
-    void reactModeFallsBackToFastWhenAutonomousDependenciesAreUnavailable() {
-        SequencedLlmClient llmClient = new SequencedLlmClient(List.of(validYaml()));
-        NovelToScreenplayAgent agent = agent(llmClient);
+    void reactModeRunsWithToolLlmClientWhenChatClientBeanIsUnavailable() {
+        SequencedLlmClient llmClient = new SequencedLlmClient(List.of(
+                "{\"thought\":\"skip optional audit\",\"action\":\"finish\",\"repair_hint\":\"\"}",
+                validYaml(),
+                "{\"thought\":\"quality is sufficient\",\"action\":\"finish\",\"repair_hint\":\"\"}"
+        ));
+        NovelToScreenplayAgent agent = autonomousAgent(llmClient);
 
         AgentResult result = agent.convert(AgentContext.of(
                 "Fog Town Letter",
@@ -31,19 +40,30 @@ class NovelToScreenplayAgentTests {
 
         assertThat(result.qualityReport().success()).isTrue();
         assertThat(result.yaml()).isEqualTo(validYaml());
-        assertThat(result.qualityReport().checks()).containsExactly(
-                "fast_mode",
+        assertThat(result.qualityReport().checks()).contains(
+                "bounded_react",
                 "chapter_parse",
+                "react_think_before_write",
                 "yaml_write",
-                "yaml_validation"
-        );
-        assertThat(result.agentTrace().toolCalls()).isEqualTo(3);
+                "yaml_validation",
+                "react_think_after_write"
+        ).doesNotContain("fast_mode");
+        assertThat(result.agentTrace().mode()).isEqualTo("react");
         assertThat(result.agentTrace().steps())
                 .extracting(AgentResult.Step::tool)
-                .containsExactly("chapter_parse", "yaml_write", "yaml_validation");
+                .containsExactly(
+                        "chapter_parse",
+                        "react_think",
+                        "react_finish",
+                        "yaml_write",
+                        "yaml_validation",
+                        "react_think",
+                        "react_finish"
+                );
         assertThat(result.warnings()).isEmpty();
-        assertThat(llmClient.calls()).hasSize(1);
-        assertThat(llmClient.calls().getFirst()).contains("Parsed chapters:");
+        assertThat(llmClient.calls()).hasSize(3);
+        assertThat(llmClient.calls().getFirst()).contains("Phase: before write");
+        assertThat(llmClient.calls().get(1)).contains("Parsed chapters:");
     }
 
     @Test
@@ -66,12 +86,78 @@ class NovelToScreenplayAgentTests {
                 "yaml_write",
                 "yaml_validation"
         );
+        assertThat(result.agentTrace().mode()).isEqualTo("fast");
         assertThat(result.agentTrace().toolCalls()).isEqualTo(3);
         assertThat(result.agentTrace().steps())
                 .extracting(AgentResult.Step::tool)
                 .containsExactly("chapter_parse", "yaml_write", "yaml_validation");
         assertThat(llmClient.calls()).hasSize(1);
         assertThat(llmClient.calls().getFirst()).contains("Parsed chapters:");
+    }
+
+    @Test
+    void reactModeRunsBoundedThinkAuditLoopAndUsesRagAdvisors() {
+        AdvisorCapturingLlmClient llmClient = new AdvisorCapturingLlmClient(List.of(
+                "{\"thought\":\"check source coverage first\",\"action\":\"source_coverage_audit\",\"repair_hint\":\"\"}",
+                validThreeSceneYaml(),
+                "{\"thought\":\"review the generated draft\",\"action\":\"screenplay_quality_review\",\"repair_hint\":\"\"}",
+                validThreeSceneYaml()
+        ));
+        Advisor advisor = testAdvisor();
+        NovelToScreenplayAgent agent = new NovelToScreenplayAgent(
+                new ChapterParseTool(),
+                new ScreenplayYamlWriteTool(provider(llmClient)),
+                new SourceCoverageAuditTool(),
+                new ScreenplayQualityReviewTool(),
+                new YamlSchemaValidator(),
+                new YamlRepairTool(provider(llmClient)),
+                llmClient,
+                false,
+                List.of(advisor),
+                true,
+                Duration.ofSeconds(10),
+                12_000
+        );
+
+        AgentResult result = agent.convert(AgentContext.of(
+                "Fog Town Letter",
+                sourceText(),
+                "short_drama",
+                "restrained",
+                "react"
+        ));
+
+        assertThat(result.qualityReport().success())
+                .describedAs("message=%s checks=%s warnings=%s steps=%s yaml=%s",
+                        result.qualityReport().message(),
+                        result.qualityReport().checks(),
+                        result.warnings(),
+                        result.agentTrace().steps(),
+                        result.yaml())
+                .isTrue();
+        assertThat(result.agentTrace().mode()).isEqualTo("react");
+        assertThat(result.qualityReport().checks())
+                .contains(
+                        "bounded_react",
+                        "rag_advisor_attached",
+                        "react_think_before_write",
+                        "source_coverage_audit",
+                        "react_think_after_write",
+                        "screenplay_quality_review"
+                )
+                .doesNotContain("fast_mode");
+        assertThat(result.agentTrace().steps())
+                .extracting(AgentResult.Step::tool)
+                .containsSequence(
+                        "chapter_parse",
+                        "react_think",
+                        "source_coverage_audit",
+                        "yaml_write",
+                        "yaml_validation",
+                        "react_think",
+                        "screenplay_quality_review"
+                );
+        assertThat(llmClient.advisorCounts()).containsExactly(1, 1, 1, 1);
     }
 
     @Test
@@ -150,6 +236,7 @@ class NovelToScreenplayAgentTests {
 
         assertThat(result.qualityReport().success()).isTrue();
         assertThat(result.qualityReport().errorCode()).isEmpty();
+        assertThat(result.agentTrace().mode()).isEqualTo("fast");
         assertThat(result.agentTrace().toolCalls()).isEqualTo(3);
         assertThat(result.agentTrace().steps())
                 .extracting(AgentResult.Step::tool)
@@ -199,9 +286,10 @@ class NovelToScreenplayAgentTests {
         ToolLlmClient llmClient = new DevFallbackToolLlmClientConfiguration.DevFallbackToolLlmClient();
         NovelToScreenplayAgent agent = new NovelToScreenplayAgent(
                 new ChapterParseTool(),
-                new ScreenplayYamlWriteTool(llmClient),
+                new ScreenplayYamlWriteTool(provider(llmClient)),
                 new YamlSchemaValidator(),
-                new YamlRepairTool(llmClient),
+                new YamlRepairTool(provider(llmClient)),
+                llmClient,
                 llmClient.devFallback()
         );
 
@@ -247,11 +335,67 @@ class NovelToScreenplayAgentTests {
     private NovelToScreenplayAgent agent(SequencedLlmClient llmClient) {
         return new NovelToScreenplayAgent(
                 new ChapterParseTool(),
-                new ScreenplayYamlWriteTool(llmClient),
+                new ScreenplayYamlWriteTool(provider(llmClient)),
                 new YamlSchemaValidator(),
-                new YamlRepairTool(llmClient),
+                new YamlRepairTool(provider(llmClient)),
+                llmClient,
                 false
         );
+    }
+
+    private NovelToScreenplayAgent autonomousAgent(ToolLlmClient llmClient) {
+        return new NovelToScreenplayAgent(
+                new ChapterParseTool(),
+                new ScreenplayYamlWriteTool(provider(llmClient)),
+                new SourceCoverageAuditTool(),
+                new ScreenplayQualityReviewTool(),
+                new YamlSchemaValidator(),
+                new YamlRepairTool(provider(llmClient)),
+                llmClient,
+                false,
+                List.of(),
+                true,
+                Duration.ofSeconds(10),
+                12_000
+        );
+    }
+
+    private Advisor testAdvisor() {
+        return new Advisor() {
+            @Override
+            public String getName() {
+                return "test-rag-advisor";
+            }
+
+            @Override
+            public int getOrder() {
+                return 0;
+            }
+        };
+    }
+
+    private ObjectProvider<ToolLlmClient> provider(ToolLlmClient llmClient) {
+        return new ObjectProvider<>() {
+            @Override
+            public ToolLlmClient getObject(Object... args) {
+                return llmClient;
+            }
+
+            @Override
+            public ToolLlmClient getIfAvailable() {
+                return llmClient;
+            }
+
+            @Override
+            public ToolLlmClient getIfUnique() {
+                return llmClient;
+            }
+
+            @Override
+            public ToolLlmClient getObject() {
+                return llmClient;
+            }
+        };
     }
 
     private String sourceText() {
@@ -325,6 +469,68 @@ class NovelToScreenplayAgentTests {
                 """;
     }
 
+    private String validThreeSceneYaml() {
+        return validYaml()
+                .replace("dramatic_purpose: \"Open the mystery.\"", "dramatic_purpose: \"Open the mystery under pressure.\"")
+                .replace(
+                        "                    beats:\n"
+                                + "                      - type: \"action\"\n"
+                                + "                        content: \"Fog covers the platform.\"\n"
+                                + "                      - type: \"dialogue\"\n"
+                                + "                        speaker: \"Chen Mo\"\n"
+                                + "                        content: \"You should not have come back.\"\n",
+                        "                    beats:\n"
+                                + "                      - type: \"action\"\n"
+                                + "                        content: \"Fog covers the platform.\"\n"
+                                + "                      - type: \"dialogue\"\n"
+                                + "                        speaker: \"Chen Mo\"\n"
+                                + "                        content: \"You should not have come back.\"\n"
+                                + "                      - type: \"action\"\n"
+                                + "                        content: \"Lin Xia hides the letter inside her coat before answering.\"\n"
+                )
+                .replace(
+                "                notes:\n",
+                """
+                  - scene_id: "S002"
+                    scene_type: "INT"
+                    location: "Old Station Office"
+                    time_of_day: "NIGHT"
+                    characters:
+                      - "Lin Xia"
+                      - "Chen Mo"
+                    summary: "Lin Xia confronts Chen Mo under pressure."
+                    dramatic_purpose: "Escalate conflict and force a choice."
+                    beats:
+                      - type: "action"
+                        content: "Lin Xia locks the office door and lays the letter on the desk."
+                      - type: "dialogue"
+                        speaker: "Lin Xia"
+                        content: "Tell me whose handwriting this is."
+                      - type: "dialogue"
+                        speaker: "Chen Mo"
+                        content: "If I say it, neither of us leaves before midnight."
+                  - scene_id: "S003"
+                    scene_type: "EXT"
+                    location: "Abandoned Platform"
+                    time_of_day: "NIGHT"
+                    characters:
+                      - "Lin Xia"
+                      - "Chen Mo"
+                    summary: "The final clue creates a direct threat."
+                    dramatic_purpose: "Resolve the immediate conflict with a risky choice."
+                    beats:
+                      - type: "action"
+                        content: "A station clock starts moving although the power is out."
+                      - type: "dialogue"
+                        speaker: "Chen Mo"
+                        content: "Choose now, the truth or your safety."
+                      - type: "action"
+                        content: "Lin Xia pockets the letter and steps toward the dark track."
+                notes:
+                """
+        );
+    }
+
     private static final class SequencedLlmClient implements ToolLlmClient {
 
         private final Queue<String> responses;
@@ -345,6 +551,34 @@ class NovelToScreenplayAgentTests {
 
         private List<String> calls() {
             return calls;
+        }
+    }
+
+    private static final class AdvisorCapturingLlmClient implements ToolLlmClient {
+
+        private final Queue<String> responses;
+        private final List<Integer> advisorCounts = new ArrayList<>();
+
+        private AdvisorCapturingLlmClient(List<String> responses) {
+            this.responses = new ArrayDeque<>(responses);
+        }
+
+        @Override
+        public String generate(String systemPrompt, String userPrompt) {
+            if (responses.isEmpty()) {
+                throw new IllegalStateException("No mock LLM response configured.");
+            }
+            return responses.remove();
+        }
+
+        @Override
+        public String generate(String systemPrompt, String userPrompt, List<Advisor> advisors) {
+            advisorCounts.add(advisors == null ? 0 : advisors.size());
+            return generate(systemPrompt, userPrompt);
+        }
+
+        private List<Integer> advisorCounts() {
+            return advisorCounts;
         }
     }
 }

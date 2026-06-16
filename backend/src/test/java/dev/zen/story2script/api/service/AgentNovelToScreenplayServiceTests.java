@@ -61,7 +61,7 @@ class AgentNovelToScreenplayServiceTests {
         when(agent.convert(any(AgentContext.class))).thenReturn(new AgentResult(
                 "schema_version: \"1.0\"",
                 AgentResult.QualityReport.success(List.of("fast_mode"), List.of()),
-                new AgentResult.AgentTrace("react", List.of(), 0),
+                new AgentResult.AgentTrace("fast", List.of(), 0),
                 List.of()
         ));
         AgentNovelToScreenplayService service = new AgentNovelToScreenplayService(agent);
